@@ -1,0 +1,4 @@
+# Client S3/MinIO + outils du pipeline d'ingestion
+minio>=7.2.0
+python-dotenv>=1.0.0
+Pillow>=11.0.0

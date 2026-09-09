@@ -1,0 +1,20 @@
+# Données brutes (source read-only, pas versionnée dans git)
+dataset/raw/
+
+# MinIO local (serveur natif)
+minio-data/
+minio.log
+bin/
+
+# Secrets / config locale
+.env
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+
+# OS
+.DS_Store
