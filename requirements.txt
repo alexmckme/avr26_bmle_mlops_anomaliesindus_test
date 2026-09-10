@@ -1,4 +1,15 @@
-# Client S3/MinIO + outils du pipeline d'ingestion
+# ── Ingestion / stockage (MinIO) ───────────────────────────
 minio>=7.2.0
 python-dotenv>=1.0.0
 Pillow>=11.0.0
+
+# ── PaDiM (détection d'anomalies) ──────────────────────────
+# NB : TF stable ne supporte pas encore Python 3.14 -> utiliser Python 3.12
+#     pour le venv du projet (venv déjà créé en 3.12).
+tensorflow>=2.21.0
+scikit-learn>=1.5.0
+
+# ── API (FastAPI) ──────────────────────────────────────────
+fastapi>=0.115
+uvicorn[standard]>=0.30
+python-multipart>=0.0.9   # pour les uploads de fichiers (UploadFile/Form)

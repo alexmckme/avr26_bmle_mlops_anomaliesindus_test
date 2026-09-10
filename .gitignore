@@ -16,5 +16,8 @@ __pycache__/
 *.pyc
 .ipynb_checkpoints/
 
+# Artefacts modèles (non versionnés)
+models/
+
 # OS
 .DS_Store
