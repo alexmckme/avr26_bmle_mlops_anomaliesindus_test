@@ -326,6 +326,25 @@ def load_model(path) -> PadimModel:
         )
 
 
+def resolve_model_path(category: str, model_dir="models") -> Path:
+    """Résout l'artefact d'une catégorie : `<cat>.npz` (full) si présent,
+    sinon la version la plus récente `<cat>.v*.npz` / `<cat>.f*.npz`.
+
+    Lève FileNotFoundError si aucun modèle n'existe pour cette catégorie.
+    """
+    model_dir = Path(model_dir)
+    full = model_dir / f"{category}.npz"
+    if full.exists():
+        return full
+    candidates = sorted(model_dir.glob(f"{category}.*.npz"))
+    if not candidates:
+        raise FileNotFoundError(
+            f"Aucun modèle entraîné pour '{category}' dans {model_dir}/ — lancer : "
+            f"python scripts/training.py --category {category} --eval"
+        )
+    return candidates[-1]
+
+
 # ─────────────────────────────────────────────────────────────
 # Orchestration (utilisée par scripts/training.py et l'API)
 # ─────────────────────────────────────────────────────────────

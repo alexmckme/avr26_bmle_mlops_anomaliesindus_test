@@ -51,16 +51,10 @@ def _category_exists(category: str) -> bool:
 
 def _model_path_for(category: str) -> Path:
     """Modèle à utiliser pour /predict : `full` si dispo, sinon la version la plus récente."""
-    full = MODEL_DIR / f"{category}.npz"
-    if full.exists():
-        return full
-    candidates = sorted(MODEL_DIR.glob(f"{category}*.npz"))
-    if not candidates:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Aucun modèle entraîné pour '{category}' — lancer /training d'abord.",
-        )
-    return candidates[-1]
+    try:
+        return padim.resolve_model_path(category, MODEL_DIR)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @app.get("/")

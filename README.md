@@ -11,7 +11,8 @@ d'anomalies industrielles (dataset [MVTec AD](https://www.mvtec.com/company/rese
 - [x] Base de données d'images (MinIO) + ingestion `scripts/ingest_data.py`
 - [x] Entraînement PaDiM `scripts/training.py` (1 modèle/catégorie, versions simulées)
 - [x] API FastAPI `api/main.py` — endpoints `/training` et `/predict`
-- [ ] Script `predict.py` / Phase 2 (MLflow, monitoring…)
+- [x] Script de prédiction `scripts/predict.py` (CLI, heatmap, JSON)
+- [ ] Phase 2 : MLflow (suivi d'expériences + registry), Docker, monitoring…
 
 ## Architecture des données
 
@@ -41,7 +42,7 @@ flowchart LR
 ├── scripts/            # scripts « métier » exécutables
 │   ├── ingest_data.py  #   ingestion dataset -> MinIO (à exécuter 1 fois)
 │   ├── training.py     #   entraînement PaDiM (1 catégorie -> models/*.npz)
-│   └── predict.py      #   (à venir)
+│   └── predict.py      #   prédiction CLI (image locale ou clé MinIO)
 ├── api/                # application FastAPI
 │   └── main.py         #   endpoints POST /training et POST /predict
 ├── start_minio.sh      # démarre le serveur MinIO local
@@ -123,6 +124,24 @@ versions imbriquées simulant un dataset qui grandit dans le temps. Le hash
 
 Artefacts : `models/<catégorie>.npz` (full), `.v<n>.npz` (version), `.f<nn>.npz`
 (fraction) — mean + cov_inv + métadonnées. `models/` n'est pas versionné.
+
+## Prédiction (CLI)
+
+```bash
+# Image locale
+python scripts/predict.py --category bottle --image dataset/raw/bottle/test/good/000.png
+# -> Verdict : OK
+
+# Image depuis MinIO (clé d'objet)
+python scripts/predict.py --category bottle --key raw/bottle/test/broken_large/000.png
+# -> Verdict : ANOMALIE
+
+# Sauver la heatmap d'anomalie + sortie JSON
+python scripts/predict.py --category bottle --image img.png --heatmap /tmp/heat.png --json
+```
+
+Le modèle est résolu automatiquement (`models/<cat>.npz`, sinon la version la
+plus récente). Sans seuil (entraînement sans `--eval`), seul le score est affiché.
 
 ## API FastAPI
 
