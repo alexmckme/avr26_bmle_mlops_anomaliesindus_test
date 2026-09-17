@@ -19,5 +19,9 @@ __pycache__/
 # Artefacts modèles (non versionnés)
 models/
 
+# MLflow (backend local + artefacts locaux éventuels)
+mlflow.db
+mlruns/
+
 # OS
 .DS_Store

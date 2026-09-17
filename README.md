@@ -12,7 +12,8 @@ d'anomalies industrielles (dataset [MVTec AD](https://www.mvtec.com/company/rese
 - [x] Entraînement PaDiM `scripts/training.py` (1 modèle/catégorie, versions simulées)
 - [x] API FastAPI `api/main.py` — endpoints `/training` et `/predict`
 - [x] Script de prédiction `scripts/predict.py` (CLI, heatmap, JSON)
-- [ ] Phase 2 : MLflow (suivi d'expériences + registry), Docker, monitoring…
+- [x] Phase 2 : suivi d'expériences MLflow (params/métriques/artefacts dans MinIO)
+- [ ] Phase 2 (suite) : Model Registry, Docker + Compose, monitoring
 
 ## Architecture des données
 
@@ -38,7 +39,8 @@ flowchart LR
 ├── core/               # code partagé (package Python)
 │   ├── config.py       #   lecture .env (endpoint, bucket, creds…)
 │   ├── storage.py      #   client MinIO (get_client, ensure_bucket)
-│   └── padim.py        #   modèle PaDiM : fit/score, lecture MinIO
+│   ├── padim.py        #   modèle PaDiM : fit/score, lecture MinIO
+│   └── tracking.py     #   suivi MLflow (runs + artefacts MinIO)
 ├── scripts/            # scripts « métier » exécutables
 │   ├── ingest_data.py  #   ingestion dataset -> MinIO (à exécuter 1 fois)
 │   ├── training.py     #   entraînement PaDiM (1 catégorie -> models/*.npz)
@@ -142,6 +144,36 @@ python scripts/predict.py --category bottle --image img.png --heatmap /tmp/heat.
 
 Le modèle est résolu automatiquement (`models/<cat>.npz`, sinon la version la
 plus récente). Sans seuil (entraînement sans `--eval`), seul le score est affiché.
+
+## Suivi MLflow (Phase 2)
+
+Chaque entraînement est enregistré dans MLflow : **params** (category,
+data_version, fraction, img_size, ridge, n_features…), **métriques** (auc,
+threshold, n_test, elapsed_s), **tags** (`dataset_sha256`) et l'**artefact** `.npz`.
+Les artefacts sont rangés dans **MinIO** (bucket `mlflow`) ; les métadonnées des
+runs dans un backend **SQLite** local (`mlflow.db`). Le dossier `models/` reste un
+cache local (l'API en a besoin même si MLflow/MinIO est indisponible).
+
+Configuration (`.env`) : `MLFLOW_TRACKING_URI` (vide ⇒ `sqlite:///mlflow.db`),
+`MLFLOW_EXPERIMENT=anomalies-indus`, `MLFLOW_ARTIFACT_BUCKET=mlflow`.
+
+```bash
+# un run MLflow par entraînement (nommé)
+python scripts/training.py --category bottle --eval --run-name bottle-full
+
+# désactiver MLflow ponctuellement
+python scripts/training.py --category bottle --no-mlflow
+```
+
+Interface web (MinIO doit tourner pour afficher les artefacts) :
+
+```bash
+export MLFLOW_S3_ENDPOINT_URL=http://localhost:9100
+export AWS_ACCESS_KEY_ID=minioadmin
+export AWS_SECRET_ACCESS_KEY=minioadmin
+mlflow ui --backend-store-uri sqlite:///mlflow.db --port 5000
+# -> http://localhost:5000
+```
 
 ## API FastAPI
 

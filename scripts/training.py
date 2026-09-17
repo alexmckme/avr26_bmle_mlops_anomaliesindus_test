@@ -19,6 +19,9 @@ Sous-ensembles (« croissance accumulée ») :
     fraction = alternative directe (0..1]. Défaut : dataset complet (full).
 
 Remarque : 1 modèle par catégorie (les catégories MVTec sont hétérogènes).
+
+Chaque entraînement est enregistré dans MLflow (params, métriques, artefact) ;
+les artefacts sont stockés dans MinIO. Désactivable avec --no-mlflow.
 """
 
 from __future__ import annotations
@@ -49,6 +52,9 @@ def main() -> int:
                         help="Fraction directe du corpus (0..1], ex: 0.5")
     parser.add_argument("--eval", action="store_true",
                         help="Calcule l'AUC sur le split test (MinIO uniquement)")
+    parser.add_argument("--no-mlflow", action="store_true",
+                        help="Désactive le suivi MLflow pour ce run")
+    parser.add_argument("--run-name", default=None, help="Nom du run MLflow")
     args = parser.parse_args()
 
     t0 = time.time()
@@ -88,6 +94,15 @@ def main() -> int:
         "elapsed_s": round(time.time() - t0, 1),
     })
     meta.update(eval_meta)
+
+    # Suivi MLflow (dégradation gracieuse si absent/indisponible)
+    if not args.no_mlflow:
+        import core.tracking as tracking
+
+        if tracking.setup_mlflow():
+            run_id = tracking.log_training(meta, artifact, run_name=args.run_name)
+            if run_id:
+                meta["mlflow_run_id"] = run_id
 
     print("\n" + "=" * 60)
     print("Entraînement PaDiM terminé")

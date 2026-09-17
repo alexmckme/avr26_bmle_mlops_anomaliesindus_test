@@ -98,6 +98,14 @@ def training(req: TrainingRequest) -> dict:
         "artifact": artifact,
         "elapsed_s": round(time.time() - t0, 1),
     })
+
+    # Suivi MLflow (même helper que les scripts)
+    from core import tracking
+
+    if tracking.setup_mlflow():
+        run_id = tracking.log_training(meta, artifact, run_name=category)
+        if run_id:
+            meta["mlflow_run_id"] = run_id
     return meta
 
 
