@@ -75,6 +75,48 @@ Fichiers locaux **non versionnés** (voir `.gitignore`) :
 - `models/` — modèles PaDiM + cache du champion
 - `mlflow.db` — backend store SQLite des runs
 
+## Démarrage rapide (nouveau clone)
+
+Après un `git clone`, les données, la config et les artefacts manquent (tous ignorés par git).
+
+```bash
+# 1. Config + dossiers (.env, dataset/raw/, models/, mlflow.db)
+./scripts/setup_env.sh
+
+# 2. Dataset MVTec AD (~5 Go) — côté hôte :
+pip install kaggle && kaggle auth login
+python scripts/download_data.py
+#    … ou 100 % Docker (identifiants Kaggle requis) :
+# docker run --rm -v "$PWD/dataset:/app/dataset" -v "$HOME/.kaggle:/root/.kaggle:ro" \
+#   -w /app anomalies-indus-api python scripts/download_data.py --dest /app/dataset/raw
+
+# 3. Construire + démarrer la stack (1er build : compter ~10-20 min selon le réseau)
+docker compose up -d --build
+
+# 4. Ingérer les images (--category pour aller vite ; sans : ~4,9 Go, 5-10 min)
+docker compose run --rm api python scripts/ingest_data.py --category bottle
+
+# 5. Entraîner + promouvoir le champion
+docker compose run --rm api python scripts/training.py --category bottle --eval --promote
+
+# 6. Prédire
+curl -X POST localhost:8000/predict \
+     -F category=bottle -F file=@dataset/raw/bottle/test/good/000.png
+# -> {"model_source":"registry","anomaly":false}
+```
+
+| Interface                | URL                        |
+| ------------------------ | -------------------------- |
+| API (Swagger)            | http://localhost:8000/docs |
+| MLflow (runs + Registry) | http://localhost:5050      |
+| MinIO (console)          | http://localhost:9200      |
+
+**Sans compte Kaggle** : `dataset/raw/` doit contenir `<catégorie>/{train/good,test}` —
+tu peux aussi télécharger l'archive depuis la page Kaggle et l'extraire dedans.
+
+> Prérequis : Docker Desktop **démarré**. Si `docker compose up` est lancé avant
+> `setup_env.sh`, Docker crée un **dossier** `mlflow.db` → supprime-le et relance le script.
+
 ## Prérequis
 
 - **Python 3.12** (TensorFlow ne supporte pas encore 3.14 ; le venv du projet est en 3.12)

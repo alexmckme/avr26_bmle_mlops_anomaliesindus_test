@@ -1,6 +1,6 @@
 # Données brutes (source read-only, pas versionnée dans git)
-dataset/raw/
-dataset/_kaggle/
+dataset/raw
+dataset/_kaggle
 
 # MinIO local (serveur natif)
 minio-data/
