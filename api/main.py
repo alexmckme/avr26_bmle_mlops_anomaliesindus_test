@@ -49,10 +49,12 @@ def _category_exists(category: str) -> bool:
     return bool(padim.list_minio_entries(client, settings.minio_bucket, prefix))
 
 
-def _model_path_for(category: str) -> Path:
-    """Modèle à utiliser pour /predict : `full` si dispo, sinon la version la plus récente."""
+def _model_path_for(category: str) -> tuple[Path, str]:
+    """Modèle à servir : champion du Registry si dispo, sinon fichiers locaux."""
+    from core import tracking
+
     try:
-        return padim.resolve_model_path(category, MODEL_DIR)
+        return tracking.resolve_inference_model(category, MODEL_DIR)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
@@ -115,7 +117,7 @@ def training(req: TrainingRequest) -> dict:
 @app.post("/predict")
 async def predict(category: str = Form(...), file: UploadFile = File(...)) -> dict:
     category = category.strip()
-    model_path = _model_path_for(category)
+    model_path, model_source = _model_path_for(category)
     model = padim.load_model(model_path)
 
     data = await file.read()
@@ -129,6 +131,7 @@ async def predict(category: str = Form(...), file: UploadFile = File(...)) -> di
     result = {
         "category": category,
         "model": model_path.name,
+        "model_source": model_source,
         "score": round(float(score), 2),
         "threshold": model.threshold,
         "anomaly": bool(score > model.threshold) if model.threshold is not None else None,

@@ -15,6 +15,8 @@ Variables d'environnement (voir .env) :
 from __future__ import annotations
 
 import os
+import shutil
+from pathlib import Path
 
 from core.config import PROJECT_ROOT, load_settings
 
@@ -196,3 +198,70 @@ def promote_if_better(registered_model: str, metric: str = "auc", alias: str = "
         "previous_champion_version": champion.version if champion else None,
         "previous_champion_score": champ_score,
     }
+
+
+# ─────────────────────────────────────────────────────────────
+# Inférence : servir le champion du Registry (avec cache local)
+# ─────────────────────────────────────────────────────────────
+def fetch_champion(registered_model: str, dest_dir="models", alias: str = "champion",
+                   category: str | None = None, force: bool = False) -> Path | None:
+    """Télécharge (et met en cache) l'artefact `.npz` du champion du Registry.
+
+    Le cache est un fichier `models/<catégorie>.champion.npz` accompagné d'un
+    fichier `.version` : si la version en cache correspond au champion courant,
+    aucun téléchargement n'est refait. Retourne le chemin du `.npz`, ou None
+    si indisponible (pas de champion, MLflow/MinIO injoignable…).
+    """
+    if not _ENABLED:
+        return None
+    try:
+        import mlflow
+
+        client = mlflow.MlflowClient()
+        mv = client.get_model_version_by_alias(registered_model, alias)
+
+        base = category or registered_model
+        dest = Path(dest_dir) / f"{base}.{alias}.npz"
+        stamp = dest.with_suffix(dest.suffix + ".version")
+        if not force and dest.exists() and stamp.exists() \
+                and stamp.read_text().strip() == str(mv.version):
+            return dest
+
+        # MLflow 3 : les modèles loggés vivent hors des artefacts du run ;
+        # l'URI `models:/<nom>@<alias>` télécharge le dossier modèle complet.
+        local_dir = mlflow.artifacts.download_artifacts(
+            artifact_uri=f"models:/{registered_model}@{alias}"
+        )
+        npz = next(Path(local_dir).rglob("*.npz"), None)
+        if npz is None:
+            print(f"[WARN] Aucun .npz dans l'artefact du champion '{registered_model}'")
+            return None
+
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(npz, dest)
+        stamp.write_text(str(mv.version))
+        print(f"[INFO] Champion '{registered_model}'@v{mv.version} téléchargé -> {dest}")
+        return dest
+    except Exception as exc:  # noqa: BLE001 — Registry/MinIO indisponible
+        print(f"[WARN] Champion '{registered_model}@{alias}' indisponible : {exc}")
+        return None
+
+
+def resolve_inference_model(category: str, model_dir="models",
+                            use_registry: bool = True) -> tuple[Path, str]:
+    """Modèle à servir pour une catégorie.
+
+    Ordre de préférence :
+      1. **champion MLflow** (téléchargé/caché dans `models/<cat>.champion.npz`) ;
+      2. **fichiers locaux** `models/<cat>.npz` ou versionnés (repli).
+
+    Retourne (chemin, origine) avec origine ∈ {'registry', 'local'}.
+    """
+    import core.padim as padim
+
+    if use_registry:
+        setup_mlflow()
+        champion = fetch_champion(f"padim-{category}", dest_dir=model_dir, category=category)
+        if champion is not None:
+            return champion, "registry"
+    return padim.resolve_model_path(category, model_dir), "local"

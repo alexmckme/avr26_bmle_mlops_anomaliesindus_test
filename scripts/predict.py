@@ -62,14 +62,23 @@ def main() -> int:
     src.add_argument("--key", help="Clé d'un objet MinIO (ex: raw/bottle/test/good/000.png)")
     parser.add_argument("--model", default=None,
                         help="Chemin explicite d'un artefact .npz (sinon auto)")
+    parser.add_argument("--no-registry", action="store_true",
+                        help="Ignorer le Registry MLflow et utiliser models/ local")
     parser.add_argument("--heatmap", default=None,
                         help="Sauvegarder la heatmap d'anomalie dans ce fichier PNG")
     parser.add_argument("--json", action="store_true", help="Sortie au format JSON")
     args = parser.parse_args()
 
-    # 1. Résolution du modèle
+    # 1. Résolution du modèle (champion MLflow si dispo, sinon local)
     try:
-        model_path = Path(args.model) if args.model else padim.resolve_model_path(args.category)
+        if args.model:
+            model_path, origin = Path(args.model), "explicit"
+        else:
+            import core.tracking as tracking
+
+            model_path, origin = tracking.resolve_inference_model(
+                args.category, use_registry=not args.no_registry
+            )
     except FileNotFoundError as exc:
         print(f"[ERREUR] {exc}", file=sys.stderr)
         return 1
@@ -96,6 +105,7 @@ def main() -> int:
     result = {
         "category": args.category,
         "model": model_path.name,
+        "model_source": origin,
         "score": round(float(score), 2),
         "threshold": model.threshold,
         "anomaly": anomaly,
@@ -108,7 +118,7 @@ def main() -> int:
         return 0
 
     print(f"Catégorie : {args.category}")
-    print(f"Modèle    : {model_path}")
+    print(f"Modèle    : {model_path}  (origine: {origin})")
     print(f"Score     : {result['score']:.0f}")
     if model.threshold is None:
         print("Seuil     : non calculé -> relancer : "

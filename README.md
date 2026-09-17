@@ -14,6 +14,7 @@ d'anomalies industrielles (dataset [MVTec AD](https://www.mvtec.com/company/rese
 - [x] Script de prédiction `scripts/predict.py` (CLI, heatmap, JSON)
 - [x] Phase 2 : suivi d'expériences MLflow (params/métriques/artefacts dans MinIO)
 - [x] Phase 2 : Model Registry — PaDiM en pyfunc, alias `candidate`/`champion`, promotion auto
+- [x] Phase 2 : inférence = champion du Registry (cache local `models/`, repli hors-ligne)
 - [ ] Phase 2 (suite) : Docker + Compose, monitoring
 
 ## Architecture des données
@@ -143,8 +144,11 @@ python scripts/predict.py --category bottle --key raw/bottle/test/broken_large/0
 python scripts/predict.py --category bottle --image img.png --heatmap /tmp/heat.png --json
 ```
 
-Le modèle est résolu automatiquement (`models/<cat>.npz`, sinon la version la
-plus récente). Sans seuil (entraînement sans `--eval`), seul le score est affiché.
+Le modèle servi est le **champion du Registry MLflow** (téléchargé et mis en
+cache dans `models/<catégorie>.champion.npz`) ; en cas d'indisponibilité du
+Registry/MinIO, repli automatique sur les fichiers locaux `models/`.
+Forcer le local : `--no-registry`. Sans seuil (entraînement sans `--eval`), seul
+le score est affiché.
 
 ## Suivi MLflow (Phase 2)
 
@@ -197,6 +201,11 @@ import mlflow
 model = mlflow.pyfunc.load_model("models:/padim-bottle@champion")
 model.predict([open("img.png", "rb").read()])   # -> score / threshold / anomaly
 ```
+
+`POST /predict` et `scripts/predict.py` servent ce champion : au 1er appel il est
+téléchargé depuis MinIO vers `models/<catégorie>.champion.npz` (+ fichier
+`.version`) ; les appels suivants réutilisent le cache tant que la version n'a
+pas changé. Le client expose l'origine via `model_source` (`registry`/`local`).
 
 ## API FastAPI
 
