@@ -1,0 +1,24 @@
+# Contexte de build Docker (exclusions)
+.git
+.gitignore
+.venv
+venv
+__pycache__
+*.pyc
+.ipynb_checkpoints
+
+# Données & artefacts locaux (jamais dans l'image)
+dataset
+minio-data
+minio.log
+models
+mlflow.db
+mlflow.db-*
+mlruns
+*.ipynb
+
+# Config locale (les variables passent par docker-compose)
+.env
+
+# Docs
+README.md

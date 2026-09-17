@@ -90,6 +90,52 @@ Après démarrage :
 - Vérification :
   `curl -s -o /dev/null -w "%{http_code}\n" http://localhost:9100/minio/health/live` → `200`
 
+## Démarrage avec Docker (stack complète)
+
+Alternative au mode natif : `docker compose` lance les 3 services.
+
+```bash
+./stop_minio.sh              # libérer les ports 9100/9200 et le dossier minio-data
+docker compose up -d --build
+docker compose logs -f api
+docker compose down
+```
+
+| Service | URL (hôte) | Rôle |
+|---|---|---|
+| `api` | http://localhost:8000/docs | FastAPI (`/training`, `/predict`) |
+| `minio` | http://localhost:9200 (console) · `localhost:9100` (API S3) | images + artefacts |
+| `mlflow` | http://localhost:5050 | tracking + Model Registry |
+
+- Les conteneurs **réutilisent tes données** : `./minio-data` (images + artefacts),
+  `./mlflow.db` (historique des runs) et `./models` (cache du champion).
+- Dans le réseau Docker, MinIO est joignable via `minio:9000` et MLflow via
+  `mlflow:5000` (voir `docker-compose.yml`).
+- Entraîner **dans** le conteneur (accès au serveur MLflow) :
+  ```bash
+  docker compose run --rm api python scripts/training.py --category bottle --eval --promote
+  ```
+- **Multi-plateformes** : le même `Dockerfile` sert `linux/amd64`
+  (Windows / Linux / Mac Intel) et `linux/arm64` (Apple Silicon) ; `requirements.txt`
+  sélectionne le bon wheel TensorFlow selon l'architecture. Pour publier une image
+  unique multi-arch sur Docker Hub :
+  ```bash
+  docker buildx build --platform linux/amd64,linux/arm64 \
+    -t <user>/anomalies-indus:latest --push .
+  ```
+
+**Dépannage (rencontré puis résolu)**
+- `pull access denied for minio/minio` → MinIO n'est **plus publié sur Docker Hub** :
+  l'image vient de Quay (`quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z`, version
+  AGPL 2025 — les builds 2026 exigent une licence).
+- `/predict` → `500 … Invalid Host header (DNS rebinding)` → autoriser le nom de
+  service Docker côté serveur MLflow :
+  `--allowed-hosts mlflow,mlflow:5000,localhost,localhost:5050,127.0.0.1`.
+- Port 5000 déjà occupé (macOS : **AirPlay Receiver**) → UI MLflow mappée sur
+  `5050:5000`.
+- Build interrompu ⇒ TensorFlow retéléchargé → les Dockerfiles utilisent un
+  **cache pip persistant** (`--mount=type=cache`) et des timeouts tolérants.
+
 ## Ingestion
 
 ```bash
@@ -179,8 +225,8 @@ Interface web (MinIO doit tourner pour afficher les artefacts) :
 export MLFLOW_S3_ENDPOINT_URL=http://localhost:9100
 export AWS_ACCESS_KEY_ID=minioadmin
 export AWS_SECRET_ACCESS_KEY=minioadmin
-mlflow ui --backend-store-uri sqlite:///mlflow.db --port 5000
-# -> http://localhost:5000
+mlflow ui --backend-store-uri sqlite:///mlflow.db --port 5050
+# -> http://localhost:5050   (5000 est occupé par AirPlay Receiver sur macOS)
 ```
 
 ### Model Registry (PaDiM en pyfunc)

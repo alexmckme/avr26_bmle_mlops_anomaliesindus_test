@@ -1,0 +1,90 @@
+# Orchestration locale de la stack MLOps « Anomalies Indus ».
+#
+#   minio  : object store S3 (images MVTec + artefacts MLflow)
+#   mlflow : serveur de tracking + Model Registry (backend SQLite, artefacts MinIO)
+#   api    : FastAPI (/training, /predict)
+#
+# Démarrage :  docker compose up -d --build
+# Arrêt     :  docker compose down
+# Logs      :  docker compose logs -f api
+#
+# Les identifiants sont repris du fichier .env (MINIO_ACCESS_KEY / MINIO_SECRET_KEY).
+# NOTE : arrêter le MinIO *natif* avant (./stop_minio.sh) : mêmes ports et mêmes données.
+name: anomalies-indus
+
+services:
+  # ── Object store S3 (données + artefacts) ──────────────────
+  minio:
+    # MinIO est publié sur Quay.io (le repo Docker Hub n'existe plus).
+    # Version AGPL de 2025 (les builds 2026 exigent une licence).
+    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-minioadmin}
+    ports:
+      - "9100:9000"   # API S3   (hôte 9100 car 9000 occupé par Jupyter)
+      - "9200:9001"   # Console  -> http://localhost:9200
+    volumes:
+      - ./minio-data:/data      # réutilise les données du MinIO natif
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ── MLflow : tracking + registry ───────────────────────────
+  mlflow:
+    build: ./docker/mlflow
+    command: >
+      mlflow server
+      --host 0.0.0.0 --port 5000
+      --backend-store-uri sqlite:////mlflow/mlflow.db
+      --default-artifact-root s3://mlflow
+      --allowed-hosts mlflow,mlflow:5000,localhost,localhost:5050,127.0.0.1,127.0.0.1:5050
+    environment:
+      MLFLOW_S3_ENDPOINT_URL: http://minio:9000
+      AWS_ACCESS_KEY_ID: ${MINIO_ACCESS_KEY:-minioadmin}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_SECRET_KEY:-minioadmin}
+      AWS_DEFAULT_REGION: us-east-1
+    ports:
+      - "5050:5000"   # UI -> http://localhost:5050 (5000 est pris par AirPlay sur macOS)
+    volumes:
+      - ./mlflow.db:/mlflow/mlflow.db   # réutilise l'historique de runs existant
+    depends_on:
+      minio:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ── API d'inférence / entraînement ─────────────────────────
+  api:
+    build: .
+    environment:
+      # MinIO (réseau interne Docker : nom de service + port conteneur)
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minioadmin}
+      MINIO_SECURE: "false"
+      MINIO_BUCKET: ${MINIO_BUCKET:-mvtec-ad}
+      DATASET_DIR: dataset/raw
+      # MLflow (serveur) + accès direct à MinIO pour les artefacts
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+      MLFLOW_EXPERIMENT: ${MLFLOW_EXPERIMENT:-anomalies-indus}
+      MLFLOW_ARTIFACT_BUCKET: ${MLFLOW_ARTIFACT_BUCKET:-mlflow}
+      MLFLOW_S3_ENDPOINT_URL: http://minio:9000
+      AWS_ACCESS_KEY_ID: ${MINIO_ACCESS_KEY:-minioadmin}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_SECRET_KEY:-minioadmin}
+      AWS_DEFAULT_REGION: us-east-1
+      MLFLOW_DISABLE_AGENT_HINT: "1"
+    ports:
+      - "8000:8000"   # docs -> http://localhost:8000/docs
+    volumes:
+      - ./models:/app/models           # cache local du modèle champion
+      - ./dataset/raw:/app/dataset/raw:ro   # utile pour --source local / ingestion
+    depends_on:
+      minio:
+        condition: service_healthy
+      mlflow:
+        condition: service_started
+    restart: unless-stopped

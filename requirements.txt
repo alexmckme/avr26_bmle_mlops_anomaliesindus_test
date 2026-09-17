@@ -4,9 +4,12 @@ python-dotenv>=1.0.0
 Pillow>=11.0.0
 
 # ── PaDiM (détection d'anomalies) ──────────────────────────
-# NB : TF stable ne supporte pas encore Python 3.14 -> utiliser Python 3.12
-#     pour le venv du projet (venv déjà créé en 3.12).
-tensorflow>=2.21.0
+# NB : TF stable ne supporte pas encore Python 3.14 -> venv en Python 3.12.
+# Multi-arch : `tensorflow-cpu` n'existe qu'en x86_64 ; sur linux/arm64
+# (Docker sur Apple Silicon) on prend le wheel `tensorflow` complet.
+tensorflow-cpu>=2.21.0; sys_platform == "linux" and platform_machine == "x86_64"
+tensorflow>=2.21.0; sys_platform == "linux" and platform_machine == "aarch64"
+tensorflow>=2.21.0; sys_platform != "linux"
 scikit-learn>=1.5.0
 
 # ── API (FastAPI) ──────────────────────────────────────────
