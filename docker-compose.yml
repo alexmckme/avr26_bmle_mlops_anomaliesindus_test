@@ -23,10 +23,10 @@ services:
       MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-minioadmin}
       MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-minioadmin}
     ports:
-      - "9100:9000"   # API S3   (hôte 9100 car 9000 occupé par Jupyter)
-      - "9200:9001"   # Console  -> http://localhost:9200
+      - "9100:9000" # API S3   (hôte 9100 car 9000 occupé par Jupyter)
+      - "9200:9001" # Console  -> http://localhost:9200
     volumes:
-      - ./minio-data:/data      # réutilise les données du MinIO natif
+      - ./minio-data:/data # réutilise les données du MinIO natif
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
       interval: 10s
@@ -49,9 +49,9 @@ services:
       AWS_SECRET_ACCESS_KEY: ${MINIO_SECRET_KEY:-minioadmin}
       AWS_DEFAULT_REGION: us-east-1
     ports:
-      - "5050:5000"   # UI -> http://localhost:5050 (5000 est pris par AirPlay sur macOS)
+      - "5050:5000" # UI -> http://localhost:5050 (5000 est pris par AirPlay sur macOS)
     volumes:
-      - ./mlflow.db:/mlflow/mlflow.db   # réutilise l'historique de runs existant
+      - ./mlflow.db:/mlflow/mlflow.db # réutilise l'historique de runs existant
     depends_on:
       minio:
         condition: service_healthy
@@ -78,10 +78,10 @@ services:
       AWS_DEFAULT_REGION: us-east-1
       MLFLOW_DISABLE_AGENT_HINT: "1"
     ports:
-      - "8000:8000"   # docs -> http://localhost:8000/docs
+      - "8000:8000" # docs -> http://localhost:8000/docs
     volumes:
-      - ./models:/app/models           # cache local du modèle champion
-      - ./dataset/raw:/app/dataset/raw:ro   # utile pour --source local / ingestion
+      - ./models:/app/models # cache local du modèle champion
+      - ./dataset/raw:/app/dataset/raw:ro # utile pour --source local / ingestion
     depends_on:
       minio:
         condition: service_healthy

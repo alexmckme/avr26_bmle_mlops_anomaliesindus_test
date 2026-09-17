@@ -101,11 +101,11 @@ docker compose logs -f api
 docker compose down
 ```
 
-| Service | URL (hôte) | Rôle |
-|---|---|---|
-| `api` | http://localhost:8000/docs | FastAPI (`/training`, `/predict`) |
-| `minio` | http://localhost:9200 (console) · `localhost:9100` (API S3) | images + artefacts |
-| `mlflow` | http://localhost:5050 | tracking + Model Registry |
+| Service  | URL (hôte)                                                  | Rôle                              |
+| -------- | ----------------------------------------------------------- | --------------------------------- |
+| `api`    | http://localhost:8000/docs                                  | FastAPI (`/training`, `/predict`) |
+| `minio`  | http://localhost:9200 (console) · `localhost:9100` (API S3) | images + artefacts                |
+| `mlflow` | http://localhost:5050                                       | tracking + Model Registry         |
 
 - Les conteneurs **réutilisent tes données** : `./minio-data` (images + artefacts),
   `./mlflow.db` (historique des runs) et `./models` (cache du champion).
@@ -125,6 +125,7 @@ docker compose down
   ```
 
 **Dépannage (rencontré puis résolu)**
+
 - `pull access denied for minio/minio` → MinIO n'est **plus publié sur Docker Hub** :
   l'image vient de Quay (`quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z`, version
   AGPL 2025 — les builds 2026 exigent une licence).
