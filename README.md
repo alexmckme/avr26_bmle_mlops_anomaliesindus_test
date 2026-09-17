@@ -8,6 +8,7 @@ d'anomalies industrielles (dataset [MVTec AD](https://www.mvtec.com/company/rese
 
 ## État d'avancement
 
+- [x] Récupération du dataset MVTec AD depuis Kaggle (`scripts/download_data.py`)
 - [x] Base de données d'images (MinIO) + ingestion `scripts/ingest_data.py`
 - [x] Entraînement PaDiM `scripts/training.py` (1 modèle/catégorie, versions de données simulées)
 - [x] API FastAPI `api/main.py` — endpoints `/training` et `/predict`
@@ -24,7 +25,8 @@ Le dataset vit dans un **object store S3 (MinIO)**, pas dans le repo :
 
 ```mermaid
 flowchart LR
-    A[dataset/raw<br/>source read-only] --> B[scripts/ingest_data.py<br/>à exécuter 1 fois]
+    K[Kaggle<br/>MVTec AD] --> A[dataset/raw<br/>source read-only]
+    A --> B[scripts/ingest_data.py<br/>à exécuter 1 fois]
     B --> C[(MinIO s3://mvtec-ad<br/>images .png + user-metadata)]
     C --> D[Entraînement PaDiM<br/>scripts/training.py · POST /training]
     D --> E[(MLflow Registry<br/>artefacts dans MinIO)]
@@ -48,9 +50,11 @@ flowchart LR
 │   ├── padim_flavor.py #   PaDiM exposé comme modèle MLflow (pyfunc)
 │   └── tracking.py     #   MLflow : runs, Registry, champion, promotion
 ├── scripts/            # scripts « métier » exécutables
+│   ├── download_data.py #  récupération du dataset MVTec AD (Kaggle) -> dataset/raw
 │   ├── ingest_data.py  #   ingestion dataset -> MinIO (à exécuter 1 fois)
 │   ├── training.py     #   entraînement PaDiM (1 catégorie -> models/*.npz)
-│   └── predict.py      #   prédiction CLI (image locale ou clé MinIO)
+│   ├── predict.py      #   prédiction CLI (image locale ou clé MinIO)
+│   └── reset_demo.sh   #   remise à zéro pour une démo « live »
 ├── api/
 │   └── main.py         #   FastAPI : POST /training et POST /predict
 ├── docker/mlflow/
@@ -209,6 +213,30 @@ Rien n'est supprimé : tout est **déplacé** vers `/tmp/anomalies-demo-backup/<
 
 Après un reset, `/predict` renvoie `404` (aucun modèle) : c'est l'état de départ idéal
 pour démontrer `/training` → Registry → promotion → `/predict`.
+
+## Récupérer le dataset (Kaggle)
+
+Étape 0 : télécharge MVTec AD et le range dans `dataset/raw/<catégorie>/`.
+À lancer **sur l'hôte** (`dataset/raw` est monté en lecture seule dans le conteneur `api`).
+
+Authentification Kaggle — au choix :
+
+```bash
+kaggle auth login                        # recommandé (OAuth)
+# ou : export KAGGLE_API_TOKEN=...       # https://www.kaggle.com/settings/api
+# ou : ~/.kaggle/kaggle.json  (chmod 600)
+```
+
+```bash
+python scripts/download_data.py                # télécharge + range
+python scripts/download_data.py --dry-run      # plan seulement (ne modifie rien)
+python scripts/download_data.py --force        # remplace les catégories existantes
+python scripts/download_data.py --from-dir /chemin/vers/zip/extrait
+```
+
+Le script détecte les 15 dossiers de catégories quelle que soit l'arborescence du
+zip (un dossier « catégorie » = `train/good/` + `test/`) et est **idempotent** :
+les catégories déjà présentes sont ignorées. Le dataset (~5 Go) n'est pas versionné.
 
 ## Ingestion
 

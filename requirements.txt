@@ -1,3 +1,6 @@
+# ── Récupération du dataset (étape 0) ─────────────────────
+kaggle>=1.6.0             # téléchargement MVTec AD via scripts/download_data.py
+
 # ── Ingestion / stockage (MinIO) ───────────────────────────
 minio>=7.2.0
 python-dotenv>=1.0.0
