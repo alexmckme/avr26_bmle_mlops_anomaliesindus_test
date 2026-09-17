@@ -1,4 +1,4 @@
-"""API FastAPI — Anomalies Indus (Phase 1).
+"""API FastAPI — Anomalies Indus.
 
 Endpoints :
     GET  /            -> infos de l'API

@@ -2,7 +2,7 @@
 """
 Ingestion du dataset MVTec AD dans MinIO (object store S3).
 
-Rôle (démonstration MLOps — Phase 1) :
+Rôle (démonstration MLOps) :
     Construire la « base de données d'images » en poussant le contenu de
     dataset/raw vers un bucket MinIO. Les futurs endpoints /training et
     /predict liront les images depuis ce bucket (et non depuis le dossier).
@@ -17,8 +17,9 @@ Principes :
     - dataset/raw reste la source read-only de référence.
 
 Usage (depuis la racine du projet) :
-    python scripts/ingest_data.py                 # ingestion complète
-    python scripts/ingest_data.py --dry-run       # simple aperçu, sans upload
+    python scripts/ingest_data.py                     # ingestion complète
+    python scripts/ingest_data.py --dry-run           # simple aperçu, sans upload
+    python scripts/ingest_data.py --category bottle   # une seule catégorie (démo)
 
 Configuration (voir .env) :
     MINIO_ENDPOINT, MINIO_ACCESS_KEY, MINIO_SECRET_KEY,
@@ -51,13 +52,18 @@ SPLITS_TO_INGEST = {"train", "test"}  # ground_truth (masques) non ingéré ici
 # ─────────────────────────────────────────────────────────────
 # Découverte des images
 # ─────────────────────────────────────────────────────────────
-def discover_images(root: Path) -> list[Path]:
-    """Parcourt dataset/raw/<category>/{train,test}/<label>/*.<ext>."""
+def discover_images(root: Path, categories: set[str] | None = None) -> list[Path]:
+    """Parcourt dataset/raw/<category>/{train,test}/<label>/*.<ext>.
+
+    `categories` (optionnel) limite le parcours à certaines catégories.
+    """
     images: list[Path] = []
     if not root.is_dir():
         print(f"[ERREUR] Dossier introuvable : {root}", file=sys.stderr)
         sys.exit(2)
     for cat_dir in sorted(p for p in root.iterdir() if p.is_dir()):
+        if categories and cat_dir.name not in categories:
+            continue
         for split_dir in sorted(p for p in cat_dir.iterdir() if p.is_dir()):
             if split_dir.name not in SPLITS_TO_INGEST:
                 continue
@@ -178,6 +184,8 @@ def main() -> int:
                         help="Dossier source (défaut : DATASET_DIR ou dataset/raw)")
     parser.add_argument("--bucket", default=None,
                         help="Bucket MinIO (défaut : MINIO_BUCKET ou mvtec-ad)")
+    parser.add_argument("--category", default=None,
+                        help="Limiter à une/des catégories (ex: bottle ou bottle,cable)")
     parser.add_argument("--dry-run", action="store_true",
                         help="Découvre les images et s'arrête avant l'upload")
     parser.add_argument("--verbose", action="store_true",
@@ -189,7 +197,19 @@ def main() -> int:
     dataset_dir = Path(args.dataset_dir or settings.dataset_dir)
     bucket = args.bucket or settings.minio_bucket
 
-    images = discover_images(dataset_dir)
+    categories = None
+    if args.category:
+        categories = {c.strip() for c in args.category.split(",") if c.strip()}
+        if dataset_dir.is_dir():
+            available = {p.name for p in dataset_dir.iterdir() if p.is_dir()}
+            unknown = categories - available
+            if unknown:
+                print(f"[ERREUR] Catégorie(s) inconnue(s) : {', '.join(sorted(unknown))}",
+                      file=sys.stderr)
+                print(f"          Disponibles : {', '.join(sorted(available))}", file=sys.stderr)
+                return 2
+
+    images = discover_images(dataset_dir, categories=categories)
     print_category_counts(images)
 
     if args.dry_run:

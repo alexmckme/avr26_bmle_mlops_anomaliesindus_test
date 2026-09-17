@@ -9,13 +9,14 @@ d'anomalies industrielles (dataset [MVTec AD](https://www.mvtec.com/company/rese
 ## État d'avancement
 
 - [x] Base de données d'images (MinIO) + ingestion `scripts/ingest_data.py`
-- [x] Entraînement PaDiM `scripts/training.py` (1 modèle/catégorie, versions simulées)
+- [x] Entraînement PaDiM `scripts/training.py` (1 modèle/catégorie, versions de données simulées)
 - [x] API FastAPI `api/main.py` — endpoints `/training` et `/predict`
 - [x] Script de prédiction `scripts/predict.py` (CLI, heatmap, JSON)
-- [x] Phase 2 : suivi d'expériences MLflow (params/métriques/artefacts dans MinIO)
-- [x] Phase 2 : Model Registry — PaDiM en pyfunc, alias `candidate`/`champion`, promotion auto
-- [x] Phase 2 : inférence = champion du Registry (cache local `models/`, repli hors-ligne)
-- [ ] Phase 2 (suite) : Docker + Compose, monitoring
+- [x] Suivi d'expériences MLflow (params/métriques/artefacts dans MinIO)
+- [x] Model Registry — PaDiM exposé en pyfunc, alias `candidate`/`champion`, promotion automatique
+- [x] Inférence via le champion du Registry (cache local `models/`, repli hors-ligne)
+- [x] Stack Docker Compose : `minio` + `mlflow` + `api`
+- [ ] À venir : monitoring API, détection de dérive, orchestration du ré-entraînement
 
 ## Architecture des données
 
@@ -23,9 +24,11 @@ Le dataset vit dans un **object store S3 (MinIO)**, pas dans le repo :
 
 ```mermaid
 flowchart LR
-    A[dataset/raw<br/>source read-only] --> B[ingest_data.py<br/>à exécuter 1 fois]
+    A[dataset/raw<br/>source read-only] --> B[scripts/ingest_data.py<br/>à exécuter 1 fois]
     B --> C[(MinIO s3://mvtec-ad<br/>images .png + user-metadata)]
-    C --> D[training.py + API<br/>/training & /predict]
+    C --> D[Entraînement PaDiM<br/>scripts/training.py · POST /training]
+    D --> E[(MLflow Registry<br/>artefacts dans MinIO)]
+    E --> F[Inférence<br/>scripts/predict.py · POST /predict]
 ```
 
 - `dataset/raw/` : images MVTec AD d'origine (hors git — voir `.gitignore`).
@@ -42,33 +45,45 @@ flowchart LR
 │   ├── config.py       #   lecture .env (endpoint, bucket, creds…)
 │   ├── storage.py      #   client MinIO (get_client, ensure_bucket)
 │   ├── padim.py        #   modèle PaDiM : fit/score, lecture MinIO
-│   └── tracking.py     #   suivi MLflow (runs + artefacts MinIO)
+│   ├── padim_flavor.py #   PaDiM exposé comme modèle MLflow (pyfunc)
+│   └── tracking.py     #   MLflow : runs, Registry, champion, promotion
 ├── scripts/            # scripts « métier » exécutables
 │   ├── ingest_data.py  #   ingestion dataset -> MinIO (à exécuter 1 fois)
 │   ├── training.py     #   entraînement PaDiM (1 catégorie -> models/*.npz)
 │   └── predict.py      #   prédiction CLI (image locale ou clé MinIO)
-├── api/                # application FastAPI
-│   └── main.py         #   endpoints POST /training et POST /predict
-├── start_minio.sh      # démarre le serveur MinIO local
-├── stop_minio.sh       # arrête le serveur MinIO local
+├── api/
+│   └── main.py         #   FastAPI : POST /training et POST /predict
+├── docker/mlflow/
+│   └── Dockerfile      #   image du serveur MLflow (tracking + registry)
+├── Dockerfile          # image de l'API (FastAPI + TensorFlow)
+├── docker-compose.yml  # stack locale : minio + mlflow + api
+├── start_minio.sh      # (mode natif) démarre MinIO sur l'hôte
+├── stop_minio.sh       # (mode natif) arrête MinIO
 ├── requirements.txt
 ├── .env / .env.example
 ├── .gitignore
 └── README.md
 ```
 
+Fichiers locaux **non versionnés** (voir `.gitignore`) :
+
+- `minio-data/` — stockage MinIO (images MVTec + artefacts MLflow)
+- `models/` — modèles PaDiM + cache du champion
+- `mlflow.db` — backend store SQLite des runs
+
 ## Prérequis
 
-- Python 3.10+
-- Serveur MinIO natif (Homebrew) — installation ci-dessous
+- **Python 3.12** (TensorFlow ne supporte pas encore 3.14 ; le venv du projet est en 3.12)
+- Un **serveur MinIO**, soit via **Docker** (voir « Démarrage avec Docker »), soit en **natif** (voir « Mode natif »)
 
 > ⚠️ Sur cette machine, les ports 9000/9001 sont occupés par un kernel Jupyter :
 > MinIO tourne donc sur **9100 (API S3)** / **9200 (console)**.
 
-## Lancer le serveur MinIO
+## Mode natif : lancer MinIO (sans Docker)
 
 MinIO est un **serveur de stockage** : il doit tourner **avant** d'utiliser
-`ingest_data.py`, qui s'y connecte ensuite sur `http://localhost:9100`.
+`scripts/ingest_data.py`, qui s'y connecte ensuite sur `http://localhost:9100`.
+(Si tu utilises Docker Compose, cette section est inutile.)
 
 Installer la version libre (AGPL, sans licence) :
 
@@ -111,9 +126,11 @@ docker compose down
   `./mlflow.db` (historique des runs) et `./models` (cache du champion).
 - Dans le réseau Docker, MinIO est joignable via `minio:9000` et MLflow via
   `mlflow:5000` (voir `docker-compose.yml`).
-- Entraîner **dans** le conteneur (accès au serveur MLflow) :
+- Lancer les CLI **dans** le conteneur (accès MinIO + serveur MLflow) :
   ```bash
+  docker compose run --rm api python scripts/ingest_data.py --category bottle
   docker compose run --rm api python scripts/training.py --category bottle --eval --promote
+  docker compose run --rm api python scripts/predict.py --category bottle --key raw/bottle/test/good/000.png
   ```
 - **Multi-plateformes** : le même `Dockerfile` sert `linux/amd64`
   (Windows / Linux / Mac Intel) et `linux/arm64` (Apple Silicon) ; `requirements.txt`
@@ -137,6 +154,62 @@ docker compose down
 - Build interrompu ⇒ TensorFlow retéléchargé → les Dockerfiles utilisent un
   **cache pip persistant** (`--mount=type=cache`) et des timeouts tolérants.
 
+## Vérifier que tout tourne bien dans Docker (et pas en local)
+
+```bash
+# 1) 3 conteneurs, leurs images et leurs ports
+docker compose ps
+
+# 2) l'hôte est macOS, le conteneur est un Linux -> on exécute bien une image
+uname -a                                # Darwin ... arm64
+docker compose exec -T api uname -a      # Linux ... aarch64 GNU/Linux
+
+# 3) le PID 1 du conteneur EST le service
+docker compose exec -T api sh -c 'tr "\0" " " < /proc/1/cmdline; echo'
+#   -> /usr/local/bin/python3.12 /usr/local/bin/uvicorn api.main:app ...
+
+# 4) rien ne tourne en local : le port est tenu par Docker
+lsof -nP -iTCP:8000 -sTCP:LISTEN         # com.docker.backend (pas de python)
+pgrep -fl uvicorn                        # aucun processus
+python3 -c "import tensorflow"           # ModuleNotFoundError (TF est dans l'image)
+
+# 5) les noms de services n'existent QUE dans le réseau Docker
+docker compose exec -T api getent hosts minio mlflow   # 172.18.0.x
+docker compose exec -T api curl -s -o /dev/null -w '%{http_code}\n' \
+     http://minio:9000/minio/health/live                # 200
+curl -s --max-time 5 http://minio:9000/minio/health/live  # échec : nom inconnu de l'hôte
+
+# 6) test négatif : couper le conteneur coupe le service
+docker compose stop api    # /predict devient injoignable (code pourtant présent sur l'hôte)
+docker compose start api   # et repart aussitôt
+```
+
+**Ce que ça prouve** : le service ne dépend ni de Python, ni de TensorFlow, ni de MinIO
+installés sur la machine — tout vit dans les images (`docker images` : `anomalies-indus-api`,
+`anomalies-indus-mlflow`, `quay.io/minio/minio`).
+
+## Démo à blanc (reset local)
+
+Pour une démonstration « live » sans que les runs/modèles précédents interfèrent.
+Rien n'est supprimé : tout est **déplacé** vers `/tmp/anomalies-demo-backup/<horodatage>`.
+
+```bash
+./scripts/reset_demo.sh            # garde les images MinIO, remet MLflow + modèles à zéro
+./scripts/reset_demo.sh --full     # vide aussi le bucket des images (démo complète)
+./scripts/reset_demo.sh --restore  # restaure la dernière sauvegarde
+```
+
+| Élément                                 | `reset_demo.sh` | `--full`      |
+| --------------------------------------- | --------------- | ------------- |
+| `minio-data/mlflow/` (artefacts MLflow) | vidé            | vidé          |
+| `mlflow.db` (runs + Registry + alias)   | remis à zéro    | remis à zéro  |
+| `models/` (modèles + cache champion)    | vidé            | vidé          |
+| `minio-data/mvtec-ad/` (images)         | **conservé**    | vidé          |
+| `dataset/raw/` (source)                 | jamais touché   | jamais touché |
+
+Après un reset, `/predict` renvoie `404` (aucun modèle) : c'est l'état de départ idéal
+pour démontrer `/training` → Registry → promotion → `/predict`.
+
 ## Ingestion
 
 ```bash
@@ -149,8 +222,10 @@ pip install -r requirements.txt
 cp .env.example .env   # valeurs par défaut locales OK
 
 # 3. Ingérer les images (serveur MinIO démarré, depuis la racine du projet)
-python scripts/ingest_data.py --dry-run   # aperçu, rien n'est envoyé
-python scripts/ingest_data.py             # ingestion réelle
+python scripts/ingest_data.py --dry-run               # aperçu, rien n'est envoyé
+python scripts/ingest_data.py                         # ingestion réelle (15 catégories)
+python scripts/ingest_data.py --category bottle       # une seule catégorie (démo rapide)
+python scripts/ingest_data.py --category bottle,tile  # plusieurs catégories
 ```
 
 Le script est **idempotent** : le relancer ignore les objets déjà présents avec
@@ -188,7 +263,9 @@ python scripts/predict.py --category bottle --key raw/bottle/test/broken_large/0
 # -> Verdict : ANOMALIE
 
 # Sauver la heatmap d'anomalie + sortie JSON
-python scripts/predict.py --category bottle --image img.png --heatmap /tmp/heat.png --json
+python scripts/predict.py --category bottle \
+  --image dataset/raw/bottle/test/broken_large/000.png \
+  --heatmap /tmp/heat.png --json
 ```
 
 Le modèle servi est le **champion du Registry MLflow** (téléchargé et mis en
@@ -197,7 +274,7 @@ Registry/MinIO, repli automatique sur les fichiers locaux `models/`.
 Forcer le local : `--no-registry`. Sans seuil (entraînement sans `--eval`), seul
 le score est affiché.
 
-## Suivi MLflow (Phase 2)
+## Suivi MLflow
 
 Chaque entraînement est enregistré dans MLflow : **params** (category,
 data_version, fraction, img_size, ridge, n_features…), **métriques** (auc,
@@ -208,6 +285,10 @@ cache local (l'API en a besoin même si MLflow/MinIO est indisponible).
 
 Configuration (`.env`) : `MLFLOW_TRACKING_URI` (vide ⇒ `sqlite:///mlflow.db`),
 `MLFLOW_EXPERIMENT=anomalies-indus`, `MLFLOW_ARTIFACT_BUCKET=mlflow`.
+
+> En **Docker**, le serveur MLflow tourne dans son conteneur : pour que des scripts
+> lancés **côté hôte** écrivent dans ce même serveur, utiliser
+> `MLFLOW_TRACKING_URI=http://localhost:5050`.
 
 ```bash
 # un run MLflow par entraînement (nommé)
@@ -261,9 +342,11 @@ que les scripts — anti train/serve skew). Un modèle doit exister (`/training`
 `scripts/training.py`) avant de prédire.
 
 ```bash
-# Démarrage (depuis la racine, serveur MinIO allumé)
+# Démarrage en local (serveur MinIO allumé, venv activé)
 uvicorn api.main:app --reload --port 8000
 # Docs interactives : http://localhost:8000/docs
+
+# En Docker, l'API est déjà exposée par `docker compose up -d` (même URL)
 ```
 
 ```bash
@@ -276,7 +359,8 @@ curl -X POST http://localhost:8000/training \
 
 # Prédire une image (multipart)
 curl -X POST http://localhost:8000/predict \
-     -F "category=bottle" -F "file=@/tmp/good.png"
+     -F "category=bottle" \
+     -F "file=@dataset/raw/bottle/test/good/000.png"
 # -> {"score": 7148290.0, "threshold": 38048944.0, "anomaly": false}
 ```
 

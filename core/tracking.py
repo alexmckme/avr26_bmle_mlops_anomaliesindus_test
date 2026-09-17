@@ -1,4 +1,4 @@
-"""Intégration MLflow — suivi d'expériences (Phase 2).
+"""Intégration MLflow — suivi d'expériences et Model Registry.
 
 Backend store : SQLite local (`mlflow.db`).
 Artefact store : MinIO (S3), bucket `MLFLOW_ARTIFACT_BUCKET` (défaut : `mlflow`).

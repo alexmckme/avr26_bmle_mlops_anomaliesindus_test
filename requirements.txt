@@ -17,6 +17,6 @@ fastapi>=0.115
 uvicorn[standard]>=0.30
 python-multipart>=0.0.9   # pour les uploads de fichiers (UploadFile/Form)
 
-# ── Suivi d'expériences / registry (Phase 2) ──────────────
+# ── Suivi d'expériences / Model Registry ──────────────────
 mlflow>=2.16.0
 boto3>=1.34.0             # client S3 utilisé par MLflow pour écrire dans MinIO
