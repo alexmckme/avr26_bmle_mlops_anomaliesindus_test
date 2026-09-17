@@ -103,9 +103,12 @@ def training(req: TrainingRequest) -> dict:
     from core import tracking
 
     if tracking.setup_mlflow():
-        run_id = tracking.log_training(meta, artifact, run_name=category)
-        if run_id:
-            meta["mlflow_run_id"] = run_id
+        info = tracking.log_training(meta, artifact, run_name=category,
+                                     register_model=f"padim-{category}")
+        if info:
+            meta["mlflow_run_id"] = info["run_id"]
+            if info.get("model_version") is not None:
+                meta["mlflow_model_version"] = info["model_version"]
     return meta
 
 

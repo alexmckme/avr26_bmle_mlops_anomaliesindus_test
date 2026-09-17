@@ -89,10 +89,17 @@ def is_enabled() -> bool:
     return _ENABLED
 
 
-def log_training(meta: dict, artifact_path: str, run_name: str | None = None) -> str | None:
-    """Enregistre un entraînement (params/métriques/tags + artefact `.npz`).
+def log_training(meta: dict, artifact_path: str, run_name: str | None = None,
+                 register_model: str | None = None, alias: str = "candidate") -> dict | None:
+    """Enregistre un entraînement dans MLflow.
 
-    Retourne l'ID du run MLflow, ou None si le tracking est désactivé.
+    - Toujours : params, métriques, tags (`dataset_sha256`) et `metadata.json`.
+    - `register_model` fourni : logge le modèle en **pyfunc** (PaDiM) et
+      l'enregistre dans le **Model Registry** sous ce nom, avec `alias`.
+    - Sinon : logge simplement l'artefact `.npz` (mode tracking seul).
+
+    Retourne un dict {run_id, registered_model, model_version} ou None si le
+    tracking est désactivé.
     """
     if not _ENABLED:
         return None
@@ -111,6 +118,81 @@ def log_training(meta: dict, artifact_path: str, run_name: str | None = None) ->
         if metrics:
             mlflow.log_metrics(metrics)
         mlflow.set_tags(tags)
-        mlflow.log_artifact(str(artifact_path), artifact_path="model")
         mlflow.log_dict(meta, "metadata.json")
-        return run.info.run_id
+
+        model_version = None
+        if register_model:
+            model_version = _log_and_register_padim(
+                artifact_path, register_model, alias
+            )
+        else:
+            mlflow.log_artifact(str(artifact_path), artifact_path="model")
+
+        return {
+            "run_id": run.info.run_id,
+            "registered_model": register_model,
+            "model_version": model_version,
+        }
+
+
+def _log_and_register_padim(artifact_path, register_model: str, alias: str):
+    """Logge le modèle PaDiM en pyfunc et l'enregistre (alias `alias`)."""
+    import mlflow
+    from core.padim_flavor import PadimPyfunc
+
+    kwargs = dict(
+        python_model=PadimPyfunc(),
+        artifacts={"padim_model": str(artifact_path)},
+        code_paths=[str(PROJECT_ROOT / "core")],   # modèle auto-porteur
+        pip_requirements=["mlflow", "numpy", "pandas", "Pillow",
+                          "tensorflow", "scikit-learn"],
+        registered_model_name=register_model,
+    )
+    try:  # MLflow 3 : `name` ; versions antérieures : `artifact_path`
+        model_info = mlflow.pyfunc.log_model(name="model", **kwargs)
+    except TypeError:
+        model_info = mlflow.pyfunc.log_model(artifact_path="model", **kwargs)
+
+    version = getattr(model_info, "registered_model_version", None)
+    if version is not None:
+        mlflow.MlflowClient().set_registered_model_alias(register_model, alias, version)
+    return version
+
+
+def promote_if_better(registered_model: str, metric: str = "auc", alias: str = "champion",
+                      candidate_alias: str = "candidate") -> dict:
+    """Promeut `candidate` en `champion` si sa métrique est >= celle du champion.
+
+    Réponse au besoin « charger la version précédente et comparer avec la nouvelle ».
+    """
+    import mlflow
+
+    client = mlflow.MlflowClient()
+    try:
+        candidate = client.get_model_version_by_alias(registered_model, candidate_alias)
+    except Exception:  # noqa: BLE001 — pas encore de version candidate
+        return {"promoted": False, "reason": f"pas de version '{candidate_alias}'"}
+
+    cand_score = client.get_run(candidate.run_id).data.metrics.get(metric)
+
+    champion = None
+    try:
+        champion = client.get_model_version_by_alias(registered_model, alias)
+    except Exception:  # noqa: BLE001 — pas encore de champion
+        champion = None
+    champ_score = client.get_run(champion.run_id).data.metrics.get(metric) if champion else None
+
+    better = champion is None or (cand_score is not None
+                                  and (champ_score is None or cand_score >= champ_score))
+    if better:
+        client.set_registered_model_alias(registered_model, alias, candidate.version)
+
+    return {
+        "promoted": better,
+        "registered_model": registered_model,
+        "metric": metric,
+        "candidate_version": candidate.version,
+        "candidate_score": cand_score,
+        "previous_champion_version": champion.version if champion else None,
+        "previous_champion_score": champ_score,
+    }

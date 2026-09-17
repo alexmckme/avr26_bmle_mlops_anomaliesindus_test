@@ -13,7 +13,8 @@ d'anomalies industrielles (dataset [MVTec AD](https://www.mvtec.com/company/rese
 - [x] API FastAPI `api/main.py` — endpoints `/training` et `/predict`
 - [x] Script de prédiction `scripts/predict.py` (CLI, heatmap, JSON)
 - [x] Phase 2 : suivi d'expériences MLflow (params/métriques/artefacts dans MinIO)
-- [ ] Phase 2 (suite) : Model Registry, Docker + Compose, monitoring
+- [x] Phase 2 : Model Registry — PaDiM en pyfunc, alias `candidate`/`champion`, promotion auto
+- [ ] Phase 2 (suite) : Docker + Compose, monitoring
 
 ## Architecture des données
 
@@ -163,6 +164,9 @@ python scripts/training.py --category bottle --eval --run-name bottle-full
 
 # désactiver MLflow ponctuellement
 python scripts/training.py --category bottle --no-mlflow
+
+# tracking seul (sans enregistrer dans le Registry)
+python scripts/training.py --category bottle --no-register
 ```
 
 Interface web (MinIO doit tourner pour afficher les artefacts) :
@@ -173,6 +177,25 @@ export AWS_ACCESS_KEY_ID=minioadmin
 export AWS_SECRET_ACCESS_KEY=minioadmin
 mlflow ui --backend-store-uri sqlite:///mlflow.db --port 5000
 # -> http://localhost:5000
+```
+
+### Model Registry (PaDiM en pyfunc)
+
+PaDiM n'étant pas un modèle scikit-learn/keras, il est exposé comme modèle MLflow
+standard via un flavor **`pyfunc`** (`core/padim_flavor.py`, qui réutilise
+`core/padim.py`). Chaque entraînement crée une **version** du registered model
+`padim-<catégorie>` taguée `candidate` ; avec `--promote`, l'AUC est comparée à
+celle du `champion` en place et la nouvelle version est promue si elle est meilleure.
+
+```bash
+# entraîne, enregistre une version, et promeut si meilleure
+python scripts/training.py --category bottle --eval --run-name bottle-full --promote
+```
+
+```python
+import mlflow
+model = mlflow.pyfunc.load_model("models:/padim-bottle@champion")
+model.predict([open("img.png", "rb").read()])   # -> score / threshold / anomaly
 ```
 
 ## API FastAPI

@@ -55,6 +55,10 @@ def main() -> int:
     parser.add_argument("--no-mlflow", action="store_true",
                         help="Désactive le suivi MLflow pour ce run")
     parser.add_argument("--run-name", default=None, help="Nom du run MLflow")
+    parser.add_argument("--no-register", action="store_true",
+                        help="Ne pas enregistrer le modèle dans le Model Registry")
+    parser.add_argument("--promote", action="store_true",
+                        help="Promouvoir le modèle en 'champion' si son AUC est meilleure")
     args = parser.parse_args()
 
     t0 = time.time()
@@ -100,9 +104,15 @@ def main() -> int:
         import core.tracking as tracking
 
         if tracking.setup_mlflow():
-            run_id = tracking.log_training(meta, artifact, run_name=args.run_name)
-            if run_id:
-                meta["mlflow_run_id"] = run_id
+            register_model = None if args.no_register else f"padim-{args.category}"
+            info = tracking.log_training(meta, artifact, run_name=args.run_name,
+                                         register_model=register_model)
+            if info:
+                meta["mlflow_run_id"] = info["run_id"]
+                if info.get("model_version") is not None:
+                    meta["mlflow_model_version"] = info["model_version"]
+                if args.promote and register_model:
+                    meta["mlflow_promotion"] = tracking.promote_if_better(register_model)
 
     print("\n" + "=" * 60)
     print("Entraînement PaDiM terminé")
