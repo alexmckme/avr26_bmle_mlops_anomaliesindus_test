@@ -17,7 +17,8 @@ d'anomalies industrielles (dataset [MVTec AD](https://www.mvtec.com/company/rese
 - [x] Model Registry — PaDiM exposé en pyfunc, alias `candidate`/`champion`, promotion automatique
 - [x] Inférence via le champion du Registry (cache local `models/`, repli hors-ligne)
 - [x] Stack Docker Compose : `minio` + `mlflow` + `api`
-- [ ] À venir : monitoring API, détection de dérive, orchestration du ré-entraînement
+- [x] Orchestration Airflow (profil `airflow`) : DAG planifié qui déclenche `/training`
+- [ ] À venir : monitoring API, détection de dérive
 
 ## Architecture des données
 
@@ -57,10 +58,12 @@ flowchart LR
 │   └── reset_demo.sh   #   remise à zéro pour une démo « live »
 ├── api/
 │   └── main.py         #   FastAPI : POST /training et POST /predict
+├── airflow/dags/
+│   └── training_pipeline.py # DAG Airflow : appelle POST /training (planifié)
 ├── docker/mlflow/
 │   └── Dockerfile      #   image du serveur MLflow (tracking + registry)
 ├── Dockerfile          # image de l'API (FastAPI + TensorFlow)
-├── docker-compose.yml  # stack locale : minio + mlflow + api
+├── docker-compose.yml  # stack : minio + mlflow + api (+ airflow via profil)
 ├── start_minio.sh      # (mode natif) démarre MinIO sur l'hôte
 ├── stop_minio.sh       # (mode natif) arrête MinIO
 ├── requirements.txt
@@ -153,20 +156,23 @@ Après démarrage :
 
 ## Démarrage avec Docker (stack complète)
 
-Alternative au mode natif : `docker compose` lance les 3 services.
+Alternative au mode natif : `docker compose` lance les 3 services du cœur applicatif
+(`airflow` est optionnel, derrière un profil : voir la section Orchestration).
 
 ```bash
 ./stop_minio.sh              # libérer les ports 9100/9200 et le dossier minio-data
 docker compose up -d --build
+docker compose --profile airflow up -d   # optionnel : + orchestration
 docker compose logs -f api
 docker compose down
 ```
 
-| Service  | URL (hôte)                                                  | Rôle                              |
-| -------- | ----------------------------------------------------------- | --------------------------------- |
-| `api`    | http://localhost:8000/docs                                  | FastAPI (`/training`, `/predict`) |
-| `minio`  | http://localhost:9200 (console) · `localhost:9100` (API S3) | images + artefacts                |
-| `mlflow` | http://localhost:5050                                       | tracking + Model Registry         |
+| Service   | URL (hôte)                                                  | Rôle                              |
+| --------- | ----------------------------------------------------------- | --------------------------------- |
+| `api`     | http://localhost:8000/docs                                  | FastAPI (`/training`, `/predict`) |
+| `minio`   | http://localhost:9200 (console) · `localhost:9100` (API S3) | images + artefacts                |
+| `mlflow`  | http://localhost:5050                                       | tracking + Model Registry         |
+| `airflow` | http://localhost:8080 (profil `airflow`, admin/admin)       | orchestration du ré-entraînement  |
 
 - Les conteneurs **réutilisent tes données** : `./minio-data` (images + artefacts),
   `./mlflow.db` (historique des runs) et `./models` (cache du champion).
@@ -441,3 +447,95 @@ curl -X POST http://localhost:8000/predict \
 Exemple validé (`bottle`) : `/training` renvoie `auc = 0.9992` et un seuil de
 `38 048 944` ; `/predict` renvoie `anomaly: false` sur une image saine et
 `anomaly: true` sur une image `broken_large`.
+
+## Orchestration (Airflow)
+
+Objectif volontairement simple : **montrer qu'un entraînement peut être déclenché
+automatiquement**, à intervalle régulier, sans intervention manuelle. Airflow
+n'exécute aucune logique de ML — le DAG appelle l'API, qui reste la seule source de
+vérité (découplage total orchestration / compute, et image Airflow sans TensorFlow).
+
+```bash
+docker compose --profile airflow up -d
+# UI : http://localhost:8080      (admin / admin)
+# DAG : training_pipeline, actif et planifié toutes les minutes
+```
+
+Le profil `airflow` évite d'imposer l'image (~1,5 Go) et ~1 min de démarrage à qui
+veut seulement l'API : `docker compose up -d` reste la stack applicative minimale.
+
+### Le DAG : `airflow/dags/training_pipeline.py`
+
+```mermaid
+flowchart LR
+    S[scheduler<br/>toutes les minutes] --> A[check_api<br/>curl GET /]
+    A --> B[train<br/>curl POST /training]
+    B --> M[(MLflow<br/>run + métriques)]
+    T[Trigger manuel<br/>avec config] --> B
+```
+
+| Élément        | Valeur                                                             |
+| -------------- | ------------------------------------------------------------------ |
+| Planification  | `TRAINING_SCHEDULE` (`.env`, défaut `* * * * *` = chaque minute)   |
+| Concurrence    | `max_active_runs=1`, `catchup=False`                               |
+| Run par défaut | `{category: bottle, data_version: 0, eval: true, register: false}` |
+| Surcharge      | `dag_run.conf` (bouton « Trigger DAG w/ config » de l'UI)          |
+
+- **Les runs planifiés sont légers** (`register: false`) : le DAG ne crée que les
+  runs MLflow et leurs métriques. À 1 run/min, enregistrer l'artefact (~260 Mo par
+  modèle) produirait ~15 Go/heure dans MinIO.
+- Un run planifié dure ~15-35 s (évaluation des 83 images de test + réécriture du
+  `.npz` local de ~260 Mo dans `models/`) ; `max_active_runs=1` évite tout empilement.
+  Le tout premier appel après une reconstruction de l'image `api` est bien plus long
+  (~2-3 min) : TensorFlow retélécharge les poids Keras dans le conteneur.
+- **La promotion du champion se déclenche à la demande**, en passant d'autres
+  paramètres dans la config du run :
+
+  ```json
+  { "category": "bottle", "data_version": 4, "eval": true, "register": true }
+  ```
+
+  La réponse de `/training` (AUC, version registrée, décision de promotion) s'affiche
+  dans le **log de la tâche `train`**.
+
+### Cycle complet (la démonstration « champion »)
+
+```bash
+# 1. Une version moins bonne (20 % des données) -> promue ? non
+#    (garde-fou : la promotion n'a lieu que si l'AUC est >= celle du champion)
+# 2. Le dataset complet -> promotion en 'champion'
+docker compose exec airflow airflow dags trigger training_pipeline \
+     -c '{"category": "bottle", "data_version": 4, "eval": true, "register": true}'
+```
+
+### Choix de simplicité assumés
+
+- Metadata DB **SQLite** dans le volume `airflow-home` : l'historique des runs
+  Airflow survit à `docker compose down` (mais pas à `down -v`). En production :
+  Postgres + `LocalExecutor` dédiés.
+- `SequentialExecutor` : une tâche à la fois — suffisant ici (une seule tâche métier),
+  à remplacer pour de la vraie concurrence.
+- Airflow n'est **pas** dans `requirements.txt` : il vit uniquement dans son conteneur,
+  aucune dépendance Airflow côté hôte ni côté API.
+
+### Dépannage (rencontré puis résolu)
+
+- Webserver muet (port 8080 → `000`) après un redémarrage, avec dans les logs
+  `Error: Already running on PID … (or pid file … is stale)` → les fichiers `.pid`
+  persistent dans le volume `airflow-home` et bloquent le démarrage suivant. C'est
+  nettoyé automatiquement (`rm -f /opt/airflow/*.pid` dans la `command:` du service).
+- La `command:` du service doit tenir sur **une seule ligne** : dans un `bash -c "…"`
+  multi-ligne, chaque retour à la ligne coupe la commande et le conteneur sort en
+  boucle (`--firstname: command not found`).
+- `airflow dags list`, `dags test`, `tasks test` fonctionnent **sans** le webserver :
+  pratique pour valider un DAG pendant que l'UI démarre (~1 min).
+
+### Arrêter ou ralentir l'automatisation
+
+```bash
+# mettre le DAG en pause (l'historique et l'UI restent consultables)
+docker compose exec airflow airflow dags pause training_pipeline
+
+# … ou changer la cadence pour la prochaine session : TRAINING_SCHEDULE=@daily dans .env
+#     puis  docker compose --profile airflow up -d airflow
+```

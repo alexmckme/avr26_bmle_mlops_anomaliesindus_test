@@ -42,6 +42,7 @@ class TrainingRequest(BaseModel):
     fraction: Optional[float] = Field(default=None, gt=0.0, le=1.0)
     img_size: int = Field(default=padim.IMG_SIZE)
     eval: bool = False                               # AUC + seuil sur le split test
+    register: bool = True                            # version au Registry (artefact ~260 Mo)
     promote: bool = True                             # promouvoir en 'champion' si meilleur
 
 
@@ -106,13 +107,16 @@ def training(req: TrainingRequest) -> dict:
     from core import tracking
 
     if tracking.setup_mlflow():
-        info = tracking.log_training(meta, artifact, run_name=category,
-                                     register_model=f"padim-{category}")
+        info = tracking.log_training(
+            meta, artifact, run_name=category,
+            register_model=f"padim-{category}" if req.register else None,
+        )
         if info:
             meta["mlflow_run_id"] = info["run_id"]
             if info.get("model_version") is not None:
                 meta["mlflow_model_version"] = info["model_version"]
-            if req.promote:
+            # La promotion ne concerne que la version qu'on vient d'enregistrer.
+            if req.register and req.promote:
                 meta["mlflow_promotion"] = tracking.promote_if_better(f"padim-{category}")
     return meta
 

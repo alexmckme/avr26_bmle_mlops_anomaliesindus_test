@@ -1,10 +1,12 @@
 # Orchestration locale de la stack MLOps « Anomalies Indus ».
 #
-#   minio  : object store S3 (images MVTec + artefacts MLflow)
-#   mlflow : serveur de tracking + Model Registry (backend SQLite, artefacts MinIO)
-#   api    : FastAPI (/training, /predict)
+#   minio   : object store S3 (images MVTec + artefacts MLflow)
+#   mlflow  : serveur de tracking + Model Registry (backend SQLite, artefacts MinIO)
+#   api     : FastAPI (/training, /predict)
+#   airflow : orchestration du ré-entraînement (profil « airflow », voir plus bas)
 #
 # Démarrage :  docker compose up -d --build
+# + Airflow :  docker compose --profile airflow up -d   (UI : http://localhost:8080)
 # Arrêt     :  docker compose down
 # Logs      :  docker compose logs -f api
 #
@@ -88,3 +90,45 @@ services:
       mlflow:
         condition: service_started
     restart: unless-stopped
+
+  # ── Orchestration (profil « airflow ») ─────────────────────
+  # Démonstration d'automatisation : le DAG `training_pipeline` appelle
+  # POST /training à intervalle régulier (défaut : toutes les minutes).
+  # Volontairement un seul conteneur (`airflow standalone` = metadata DB SQLite +
+  # scheduler + webserver) et aucune dépendance ML : Airflow orchestre, l'API exécute.
+  #
+  #   docker compose --profile airflow up -d
+  #   UI : http://localhost:8080   (admin / admin)
+  airflow:
+    image: apache/airflow:2.10.5-python3.12 # 2.x : Airflow 3 ne supporte plus SQLite
+    profiles: ["airflow"] # n'alourdit pas `docker compose up -d` par défaut
+    # `standalone` = metadata DB + scheduler + webserver dans un seul conteneur.
+    #  - `rm -f *.pid` : les pid files du volume survivent à la recréation du conteneur,
+    #    et Airflow refuse alors de démarrer son webserver (« Already running on PID… »).
+    #  - compte admin (re)fixé : sinon Airflow génère un mot de passe aléatoire à
+    #    récupérer dans les logs, peu pratique en démo.
+    # NB : commande sur UNE seule ligne (`;` et non retours à la ligne dans `bash -c`).
+    command: 'bash -c "rm -f /opt/airflow/*.pid; airflow db migrate; airflow users reset-password --username admin --password admin || airflow users create --username admin --password admin --firstname Admin --lastname User --role Admin --email admin@example.com; exec airflow standalone"'
+    environment:
+      # — comportement Airflow
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false" # pas les ~60 DAGs d'exemple
+      AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "false" # le DAG démarre actif
+      AIRFLOW__CORE__EXECUTOR: SequentialExecutor # suffisant pour la démo
+      AIRFLOW__WEBSERVER__EXPOSE_CONFIG: "true"
+      AIRFLOW__WEBSERVER__SECRET_KEY: anomalies-indus-demo # sessions stables
+      PYTHONDONTWRITEBYTECODE: "1" # pas de __pycache__ dans les DAGs montés
+      # — réglages lus par le DAG (airflow/dags/training_pipeline.py)
+      API_BASE_URL: http://api:8000 # nom de service Docker
+      TRAINING_SCHEDULE: "${TRAINING_SCHEDULE:-* * * * *}"
+    ports:
+      - "8080:8080" # UI -> http://localhost:8080
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags # les DAGs restent du code versionné
+      - airflow-home:/opt/airflow # metadata DB + logs, persistants entre `down`
+    depends_on:
+      api:
+        condition: service_started
+    restart: unless-stopped
+
+volumes:
+  airflow-home:
