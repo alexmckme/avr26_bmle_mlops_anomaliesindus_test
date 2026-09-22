@@ -18,7 +18,8 @@ d'anomalies industrielles (dataset [MVTec AD](https://www.mvtec.com/company/rese
 - [x] Inférence via le champion du Registry (cache local `models/`, repli hors-ligne)
 - [x] Stack Docker Compose : `minio` + `mlflow` + `api`
 - [x] Orchestration Airflow (profil `airflow`) : DAG planifié qui déclenche `/training`
-- [ ] À venir : monitoring API, détection de dérive
+- [x] Monitoring Prometheus + Grafana (profil `monitoring`) : `/metrics`, dashboards, alertes
+- [ ] À venir : détection de dérive des données (comparaison de distributions)
 
 ## Architecture des données
 
@@ -48,6 +49,7 @@ flowchart LR
 │   ├── config.py       #   lecture .env (endpoint, bucket, creds…)
 │   ├── storage.py      #   client MinIO (get_client, ensure_bucket)
 │   ├── padim.py        #   modèle PaDiM : fit/score, lecture MinIO
+│   ├── metrics.py      #   métriques Prometheus (service + modèle)
 │   ├── padim_flavor.py #   PaDiM exposé comme modèle MLflow (pyfunc)
 │   └── tracking.py     #   MLflow : runs, Registry, champion, promotion
 ├── scripts/            # scripts « métier » exécutables
@@ -60,10 +62,13 @@ flowchart LR
 │   └── main.py         #   FastAPI : POST /training et POST /predict
 ├── airflow/dags/
 │   └── training_pipeline.py # DAG Airflow : appelle POST /training (planifié)
+├── monitoring/
+│   ├── prometheus/     #   prometheus.yml (collecte) + alerts.yml (règles)
+│   └── grafana/        #   provisioning + dashboard (dashboards as code)
 ├── docker/mlflow/
 │   └── Dockerfile      #   image du serveur MLflow (tracking + registry)
 ├── Dockerfile          # image de l'API (FastAPI + TensorFlow)
-├── docker-compose.yml  # stack : minio + mlflow + api (+ airflow via profil)
+├── docker-compose.yml  # stack : minio + mlflow + api (+ airflow/monitoring via profils)
 ├── start_minio.sh      # (mode natif) démarre MinIO sur l'hôte
 ├── stop_minio.sh       # (mode natif) arrête MinIO
 ├── requirements.txt
@@ -157,22 +162,26 @@ Après démarrage :
 ## Démarrage avec Docker (stack complète)
 
 Alternative au mode natif : `docker compose` lance les 3 services du cœur applicatif
-(`airflow` est optionnel, derrière un profil : voir la section Orchestration).
+(`airflow` et `monitoring` sont optionnels, derrière des profils : voir les sections
+Orchestration et Monitoring).
 
 ```bash
-./stop_minio.sh              # libérer les ports 9100/9200 et le dossier minio-data
+./stop_minio.sh                           # libérer les ports 9100/9200 et le dossier minio-data
 docker compose up -d --build
-docker compose --profile airflow up -d   # optionnel : + orchestration
+docker compose --profile airflow up -d     # optionnel : + orchestration
+docker compose --profile monitoring up -d  # optionnel : + Prometheus/Grafana
 docker compose logs -f api
 docker compose down
 ```
 
-| Service   | URL (hôte)                                                  | Rôle                              |
-| --------- | ----------------------------------------------------------- | --------------------------------- |
-| `api`     | http://localhost:8000/docs                                  | FastAPI (`/training`, `/predict`) |
-| `minio`   | http://localhost:9200 (console) · `localhost:9100` (API S3) | images + artefacts                |
-| `mlflow`  | http://localhost:5050                                       | tracking + Model Registry         |
-| `airflow` | http://localhost:8080 (profil `airflow`, admin/admin)       | orchestration du ré-entraînement  |
+| Service      | URL (hôte)                                                  | Rôle                              |
+| ------------ | ----------------------------------------------------------- | --------------------------------- |
+| `api`        | http://localhost:8000/docs                                  | FastAPI (`/training`, `/predict`, `/metrics`) |
+| `minio`      | http://localhost:9200 (console) · `localhost:9100` (API S3) | images + artefacts                |
+| `mlflow`     | http://localhost:5050                                       | tracking + Model Registry         |
+| `airflow`    | http://localhost:8080 (profil `airflow`, admin/admin)       | orchestration du ré-entraînement  |
+| `prometheus` | http://localhost:9090 (profil `monitoring`)                 | collecte des métriques            |
+| `grafana`    | http://localhost:3000 (profil `monitoring`, admin/admin)    | tableaux de bord et alertes       |
 
 - Les conteneurs **réutilisent tes données** : `./minio-data` (images + artefacts),
   `./mlflow.db` (historique des runs) et `./models` (cache du champion).
@@ -209,7 +218,8 @@ docker compose down
 ## Vérifier que tout tourne bien dans Docker (et pas en local)
 
 ```bash
-# 1) 3 conteneurs, leurs images et leurs ports
+# 1) les conteneurs du cœur applicatif (minio + mlflow + api)
+#    --profile airflow / --profile monitoring en ajoutent d'autres
 docker compose ps
 
 # 2) l'hôte est macOS, le conteneur est un Linux -> on exécute bien une image
@@ -539,3 +549,97 @@ docker compose exec airflow airflow dags pause training_pipeline
 # … ou changer la cadence pour la prochaine session : TRAINING_SCHEDULE=@daily dans .env
 #     puis  docker compose --profile airflow up -d airflow
 ```
+
+## Monitoring (Prometheus + Grafana)
+
+**À quoi ça sert ?** MLflow répond à *« quel modèle est le meilleur ? »* (historique,
+comparaison d'expériences). Le monitoring répond à *« comment se comporte le système
+maintenant ? »* — la question de la mise en production : est-ce que ça répond, est-ce
+que ça répond vite, et **est-ce que ce que le modèle prédit a encore du sens ?**
+
+| Outil          | Rôle | Analogie |
+| -------------- | ---- | -------- |
+| **Prometheus** | Collecte et stocke des séries temporelles. Il *vient chercher* (modèle « pull ») l'endpoint `/metrics` toutes les 15 s. | la base de données des chiffres dans le temps |
+| **Grafana**    | Interroge Prometheus et dessine courbes, jauges et alertes. | l'écran du tableau de bord |
+
+```mermaid
+flowchart LR
+    A[API FastAPI<br/>/predict · /training] -->|GET /metrics toutes les 15 s| P[(Prometheus<br/>séries temporelles)]
+    P --> G[Grafana<br/>dashboards]
+    P -.->|règles d'alerte| AL[Alertes<br/>onglet Alerts]
+```
+
+```bash
+docker compose --profile monitoring up -d
+# Grafana    : http://localhost:3000  (admin/admin ; accès anonyme en lecture pour la démo)
+# Prometheus : http://localhost:9090  (onglets Targets et Alerts pour déboguer)
+```
+
+### Ce qui est exposé
+
+L'API expose `GET /metrics`. Deux familles de métriques :
+
+| Métrique | Type | Ce qu'elle raconte |
+| -------- | ---- | ------------------ |
+| `http_requests_total`, `http_request_duration_seconds` | compteur, histogramme | débit, latence et codes de statut (instrumentation FastAPI automatique) |
+| `anomalies_predictions_total{category,verdict}` | compteur | combien de pièces jugées saines / défectueuses |
+| `anomalies_prediction_score_ratio{category}` | jauge | dernier score **rapporté au seuil** (1.0 = pile le seuil) |
+| `anomalies_prediction_score{category}` | histogramme | distribution des distances de Mahalanobis² |
+| `anomalies_trainings_total{category,status}` | compteur | entraînements déclenchés (succès et échecs) |
+| `anomalies_training_duration_seconds{category}` | histogramme | durée des entraînements |
+| `anomalies_champion_auc{category}` | jauge | AUC du modèle effectivement servi (lu dans le Registry au démarrage) |
+| `anomalies_champion_promotions_total{category,promoted}` | compteur | décisions de promotion (promu / refusé) |
+
+Les métriques `anomalies_*` sont définies dans `core/metrics.py` (avec la logique
+métier) ; les `http_*` viennent de `prometheus-fastapi-instrumentator`. Si la librairie
+est absente, les helpers deviennent des no-ops et l'API continue de tourner — même
+logique de dégradation gracieuse que `core/tracking.py`.
+
+`anomalies_prediction_score_ratio` est volontairement un **rapport** : les scores de
+Mahalanobis² n'ont pas la même échelle d'une catégorie à l'autre (1e6 à 1e9), donc
+comparer des ratios est le seul moyen d'avoir un indicateur lisible et comparable.
+
+### Le tableau de bord
+
+Provisionné automatiquement (« dashboards as code ») depuis
+`monitoring/grafana/dashboards/anomalies-indus.json` : **aucun clic** après un
+`docker compose up`, et le dashboard est versionné avec le reste du code.
+
+- **Service** : débit sur `/predict`, latence p95, erreurs 5xx.
+- **Modèle** : prédictions par verdict (le ratio anomalie/normal est le premier signal
+  de dérive), score rapporté au seuil, AUC du champion, entraînements et promotions.
+
+Pour la démonstration : lancer quelques `curl /predict`, lancer un `/training`, puis
+activer le DAG Airflow (`airflow dags unpause training_pipeline`) — les courbes se
+remplissent en direct.
+
+### Les alertes
+
+`monitoring/prometheus/alerts.yml` définit 5 règles, visibles dans l'onglet **Alerts**
+de Prometheus et dans Grafana :
+
+| Alerte | Condition | Ce qu'elle signifie |
+| ------ | --------- | ------------------- |
+| `ApiIndisponible` | `up == 0` pendant 1 min | l'API ne répond plus |
+| `LatencePredictElevee` | p95 de `/predict` > 1 s pendant 5 min | l'inférence est trop lente |
+| `ErreursServeur` | plus de 0,1 erreur 5xx/s pendant 5 min | des requêtes échouent |
+| `PartAnomaliesInhabituelle` | plus de 50 % d'anomalies pendant 5 min | dérive des données **ou** seuil inadapté |
+| `QualiteChampionFaible` | `anomalies_champion_auc < 0.90` | le modèle servi est de mauvaise qualité |
+
+Il n'y a **pas d'Alertmanager** : choix assumé pour garder la stack légère. Les alertes
+sont donc visibles mais n'envoient ni e-mail ni webhook. L'étape suivante naturelle est
+d'ajouter un Alertmanager dont le webhook déclenche le DAG Airflow de ré-entraînement,
+ce qui fermerait la boucle MLOps : dérive détectée → ré-entraînement → promotion du
+champion → monitoring.
+
+### Points d'attention (rencontrés puis résolus)
+
+- L'instrumentation FastAPI regroupe les statuts en classes (`2xx`, `5xx`) et non en
+  codes bruts : écrire `status="5xx"`, pas `status="500"`.
+- `increase(counter[fenêtre])` ne voit que les **variations** : le premier événement
+  d'un processus (déjà compté au premier scrape) est invisible. Pour une démo, afficher
+  le compteur cumulé est plus parlant.
+- `histogram_quantile()` renvoie `NaN` tant qu'un histogramme n'a pas 2 points dans la
+  fenêtre. Pour des événements rares (un entraînement par heure), préférer la moyenne
+  `_sum / _count`, robuste dès la première observation.
+- Un compteur vide donne `No data` et non `0` : écrire `... or vector(0)` dans le panneau.

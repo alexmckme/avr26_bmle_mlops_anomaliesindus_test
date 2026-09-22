@@ -1,0 +1,75 @@
+# Règles d'alerte Prometheus — Anomalies Indus.
+#
+# Prometheus évalue ces expressions en continu et marque une alerte « firing »
+# quand la condition tient pendant la durée `for`. Sans Alertmanager (non installé :
+# volontairement hors périmètre), les alertes restent visibles dans l'UI Prometheus
+# (onglet Alerts) et dans Grafana. Ajouter un Alertmanager + webhook (qui déclenche
+# le DAG de ré-entraînement) serait l'étape suivante naturelle.
+
+groups:
+  - name: anomalies-indus-service
+    rules:
+      # ── Le service répond-il ? ──────────────────────────────────────────────
+      - alert: ApiIndisponible
+        expr: up{job="anomalies-api"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          composant: api
+        annotations:
+          summary: "API d'inférence injoignable depuis {{ $labels.instance }}"
+          description: "Prometheus n'arrive plus à scraper /metrics depuis 1 minute."
+
+      # ── Le service est-il lent ? ───────────────────────────────────────────
+      - alert: LatencePredictElevee
+        expr: >-
+          histogram_quantile(
+            0.95,
+            sum(rate(http_request_duration_seconds_bucket{handler="/predict"}[5m])) by (le)
+          ) > 1
+        for: 5m
+        labels:
+          severity: warning
+          composant: api
+        annotations:
+          summary: "p95 de /predict > 1 s"
+          description: "L'inférence est plus lente que la normale (modèle non caché ? MinIO lent ?)"
+
+      - alert: ErreursServeur
+        # NB : l'instrumentation FastAPI regroupe les codes en classes 2xx/3xx/4xx/5xx
+        # (label `status`), et non en codes bruts (500, 502…).
+        expr: sum(rate(http_requests_total{status="5xx"}[5m])) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+          composant: api
+        annotations:
+          summary: "Taux d'erreurs 5xx supérieur à 0,1/s"
+          description: "Des requêtes échouent : regarder les logs de l'API."
+
+  - name: anomalies-indus-modele
+    rules:
+      # ── Surveillance « métier » du modèle ─────────────────────────────────
+      - alert: PartAnomaliesInhabituelle
+        expr: >-
+          sum(rate(anomalies_predictions_total{verdict="anomaly"}[10m]))
+          / clamp_min(sum(rate(anomalies_predictions_total[10m])), 0.001) > 0.5
+        for: 5m
+        labels:
+          severity: warning
+          composant: modele
+        annotations:
+          summary: "Plus de 50 % des prédictions sont des anomalies"
+          description: >-
+            Soit la production a réellement changé (dérive des données), soit le
+            modèle/seuil n'est plus adapté. Candidat typique à un ré-entraînement.
+
+      - alert: QualiteChampionFaible
+        expr: anomalies_champion_auc < 0.9
+        for: 10m
+        labels:
+          severity: warning
+          composant: modele
+        annotations:
+          summary: "AUC du champion ({{ $labels.category }}) < 0.90"
+          description: "Le modèle servi est de mauvaise qualité : revoir les données d'entraînement."

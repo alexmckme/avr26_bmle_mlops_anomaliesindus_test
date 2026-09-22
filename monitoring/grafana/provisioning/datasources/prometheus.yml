@@ -1,0 +1,14 @@
+# Datasource Grafana provisionnée au démarrage (pas de clic dans l'UI).
+# L'UID est fixe : le dashboard versionné peut le référencer directement.
+
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    uid: prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090 # nom de service docker
+    isDefault: true
+    jsonData:
+      timeInterval: 15s # aligné sur le scrape_interval de Prometheus

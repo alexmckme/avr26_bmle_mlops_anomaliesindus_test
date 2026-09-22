@@ -1,0 +1,17 @@
+# Chargement automatique des dashboards depuis le disque (« dashboards as code »).
+# Les JSON vivent dans le repo (monitoring/grafana/dashboards) : versionnés, relus
+# à chaud, et reproductibles sur n'importe quelle machine.
+
+apiVersion: 1
+
+providers:
+  - name: anomalies-indus
+    orgId: 1
+    folder: "Anomalies Indus"
+    type: file
+    disableDeletion: false
+    allowUiUpdates: true
+    updateIntervalSeconds: 30 # recharge si le JSON change sur l'hôte
+    options:
+      path: /var/lib/grafana/dashboards
+      foldersFromFilesStructure: false

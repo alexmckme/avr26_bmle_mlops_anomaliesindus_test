@@ -1,0 +1,27 @@
+# Prometheus — configuration de collecte (profil docker `monitoring`).
+#
+# Principe : Prometheus *vient chercher* les métriques (modèle « pull »).
+# Il appelle l'endpoint `/metrics` de l'API toutes les 15 s et stocke l'historique.
+
+global:
+  scrape_interval: 15s # fréquence de collecte
+  evaluation_interval: 15s # fréquence d'évaluation des règles d'alerte
+
+# Règles d'alerte (voir alerts.yml)
+rule_files:
+  - /etc/prometheus/alerts.yml
+
+scrape_configs:
+  # ── L'API d'anomalies : métriques HTTP (http_*) + métier (anomalies_*) ──
+  - job_name: anomalies-api
+    metrics_path: /metrics
+    static_configs:
+      # `api` = nom du service dans docker compose (réseau interne)
+      - targets: ["api:8000"]
+        labels:
+          service: api
+
+  # Prometheus se surveille lui-même (utile pour débugger la collecte)
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]

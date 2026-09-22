@@ -2,11 +2,13 @@
 #
 #   minio   : object store S3 (images MVTec + artefacts MLflow)
 #   mlflow  : serveur de tracking + Model Registry (backend SQLite, artefacts MinIO)
-#   api     : FastAPI (/training, /predict)
+#   api     : FastAPI (/training, /predict, /metrics)
 #   airflow : orchestration du ré-entraînement (profil « airflow », voir plus bas)
+#   prometheus + grafana : monitoring (profil « monitoring », voir plus bas)
 #
 # Démarrage :  docker compose up -d --build
-# + Airflow :  docker compose --profile airflow up -d   (UI : http://localhost:8080)
+# + Airflow :  docker compose --profile airflow up -d      (UI : http://localhost:8080)
+# + Monitoring : docker compose --profile monitoring up -d  (Grafana : http://localhost:3000)
 # Arrêt     :  docker compose down
 # Logs      :  docker compose logs -f api
 #
@@ -130,5 +132,57 @@ services:
         condition: service_started
     restart: unless-stopped
 
+  # ── Monitoring (profil « monitoring ») ─────────────────────
+  # Prometheus *scrape* `/metrics` de l'API (modèle « pull ») et Grafana l'affiche.
+  # Rien à configurer à la main : datasource, dashboard et alertes sont provisionnés
+  # depuis ./monitoring (configuration versionnée dans le repo).
+  #
+  #   docker compose --profile monitoring up -d
+  #   Grafana    : http://localhost:3000   (admin/admin, ou accès anonyme en lecture)
+  #   Prometheus : http://localhost:9090   (onglets Targets / Alerts pour debugger)
+  prometheus:
+    image: prom/prometheus:v3.1.0
+    profiles: ["monitoring"]
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=15d # rétention des séries temporelles
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus:/etc/prometheus:ro # prometheus.yml + alerts.yml
+      - prometheus-data:/prometheus
+    depends_on:
+      api:
+        condition: service_started
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:11.5.2
+    profiles: ["monitoring"]
+    environment:
+      # Démo : accès anonyme en lecture, pour que personne n'ait à se connecter
+      # devant la soutenance (l'édition reste protégée par admin/admin).
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+    ports:
+      - "3000:3000"
+    volumes:
+      # On monte les deux sous-dossiers utilisés (et pas tout `provisioning/`) :
+      # `plugins/` et `alerting/` de l'image restent en place, ce qui évite des
+      # erreurs de provisioning « no such file or directory » au démarrage.
+      - ./monitoring/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./monitoring/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      prometheus:
+        condition: service_started
+    restart: unless-stopped
+
 volumes:
   airflow-home:
+  prometheus-data:
+  grafana-data:

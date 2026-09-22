@@ -2,6 +2,7 @@
 
 Endpoints :
     GET  /            -> infos de l'API
+    GET  /metrics     -> métriques Prometheus (profil `monitoring`)
     POST /training    -> entraîne un modèle PaDiM pour une catégorie (depuis MinIO)
     POST /predict     -> score d'anomalie d'une image avec le modèle d'une catégorie
 
@@ -17,6 +18,7 @@ from __future__ import annotations
 
 import sys
 import time
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Optional, Union
 
@@ -25,6 +27,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 
+import core.metrics as metrics
 import core.padim as padim
 from core.config import load_settings
 from core.storage import get_client
@@ -33,7 +36,32 @@ settings = load_settings()
 client = get_client(settings)                 # client MinIO partagé
 MODEL_DIR = Path(__file__).resolve().parents[1] / "models"
 
-app = FastAPI(title="Anomalies Indus API", version="0.1.0")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Au démarrage : expose l'AUC du champion courant en métrique.
+
+    Sans ça, la jauge `anomalies_champion_auc` ne serait alimentée qu'à la
+    première promotion et le tableau de bord Grafana resterait vide.
+    """
+    from core import tracking
+
+    if tracking.setup_mlflow():
+        n = metrics.refresh_champion_gauges()
+        print(f"[metrics] AUC du champion exposée pour {n} catégorie(s)")
+    yield
+
+
+app = FastAPI(title="Anomalies Indus API", version="0.1.0", lifespan=lifespan)
+
+# `/metrics` : séries temporelles que Prometheus vient chercher (modèle « pull »).
+# L'instrumentation couvre le HTTP (http_requests_total, http_request_duration_…).
+try:
+    from prometheus_fastapi_instrumentator import Instrumentator
+
+    Instrumentator().instrument(app).expose(app, endpoint="/metrics", include_in_schema=False)
+except ImportError:  # monitoring non installé : l'API reste pleinement fonctionnelle
+    print("[metrics] prometheus-fastapi-instrumentator absent : /metrics désactivé")
 
 
 class TrainingRequest(BaseModel):
@@ -64,7 +92,7 @@ def _model_path_for(category: str) -> tuple[Path, str]:
 @app.get("/")
 def root() -> dict:
     return {"app": "anomalies-indus", "version": app.version,
-            "endpoints": ["/training", "/predict"]}
+            "endpoints": ["/training", "/predict", "/metrics"]}
 
 
 @app.post("/training")
@@ -78,12 +106,16 @@ def training(req: TrainingRequest) -> dict:
         )
 
     t0 = time.time()
-    model, meta = padim.fit_from_minio(
-        client, settings.minio_bucket, category,
-        img_size=req.img_size,
-        data_version=req.data_version,
-        fraction=req.fraction,
-    )
+    try:
+        model, meta = padim.fit_from_minio(
+            client, settings.minio_bucket, category,
+            img_size=req.img_size,
+            data_version=req.data_version,
+            fraction=req.fraction,
+        )
+    except Exception:  # échec d'entraînement : compté, puis remonté en erreur 500
+        metrics.observe_training(category, "error", time.time() - t0)
+        raise
 
     if req.eval:
         meta.update(padim.evaluate_on_test(client, settings.minio_bucket, model,
@@ -117,7 +149,12 @@ def training(req: TrainingRequest) -> dict:
                 meta["mlflow_model_version"] = info["model_version"]
             # La promotion ne concerne que la version qu'on vient d'enregistrer.
             if req.register and req.promote:
-                meta["mlflow_promotion"] = tracking.promote_if_better(f"padim-{category}")
+                promo = tracking.promote_if_better(f"padim-{category}")
+                meta["mlflow_promotion"] = promo
+                metrics.observe_promotion(category, bool(promo.get("promoted")),
+                                          auc=meta.get("auc"))
+
+    metrics.observe_training(category, "success", time.time() - t0)
     return meta
 
 
@@ -143,4 +180,7 @@ async def predict(category: str = Form(...), file: UploadFile = File(...)) -> di
         "threshold": model.threshold,
         "anomaly": bool(score > model.threshold) if model.threshold is not None else None,
     }
+    # Monitoring : verdict, distribution des scores, et score/seuil (indépendant de
+    # l'échelle) — c'est le signal qui permet de détecter une dérive des données.
+    metrics.observe_prediction(category, float(score), model.threshold, result["anomaly"])
     return result
