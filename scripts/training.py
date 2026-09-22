@@ -20,8 +20,10 @@ Sous-ensembles (« croissance accumulée ») :
 
 Remarque : 1 modèle par catégorie (les catégories MVTec sont hétérogènes).
 
-Chaque entraînement est enregistré dans MLflow (params, métriques, artefact) ;
-les artefacts sont stockés dans MinIO. Désactivable avec --no-mlflow.
+Chaque entraînement est enregistré dans MLflow (params, métriques, artefact), les
+artefacts sont stockés dans MinIO, et le modèle est promu automatiquement en
+« champion » s'il fait au moins aussi bien que le champion en place (comparaison
+sur l'AUC ; nécessite --eval). Désactivable avec --no-mlflow / --no-promote.
 """
 
 from __future__ import annotations
@@ -57,8 +59,8 @@ def main() -> int:
     parser.add_argument("--run-name", default=None, help="Nom du run MLflow")
     parser.add_argument("--no-register", action="store_true",
                         help="Ne pas enregistrer le modèle dans le Model Registry")
-    parser.add_argument("--promote", action="store_true",
-                        help="Promouvoir le modèle en 'champion' si son AUC est meilleure")
+    parser.add_argument("--no-promote", action="store_true",
+                        help="Ne pas promouvoir automatiquement en 'champion'")
     args = parser.parse_args()
 
     t0 = time.time()
@@ -111,7 +113,7 @@ def main() -> int:
                 meta["mlflow_run_id"] = info["run_id"]
                 if info.get("model_version") is not None:
                     meta["mlflow_model_version"] = info["model_version"]
-                if args.promote and register_model:
+                if register_model and not args.no_promote:
                     meta["mlflow_promotion"] = tracking.promote_if_better(register_model)
 
     print("\n" + "=" * 60)

@@ -121,5 +121,5 @@ echo "Sauvegarde : $BACKUP_DIR"
 echo "Restaurer  : ./scripts/reset_demo.sh --restore"
 echo
 echo "Démo :"
-echo "  docker compose run --rm api python scripts/training.py --category bottle --eval --promote"
+echo "  docker compose run --rm api python scripts/training.py --category bottle --eval"
 echo "  curl -X POST localhost:8000/predict -F category=bottle -F file=@dataset/raw/bottle/test/good/000.png"

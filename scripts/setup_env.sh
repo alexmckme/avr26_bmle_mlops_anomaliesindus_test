@@ -52,7 +52,7 @@ cat <<'EOF'
        docker compose run --rm api python scripts/ingest_data.py --category bottle
 
   4. Entraîner + promouvoir le champion :
-       docker compose run --rm api python scripts/training.py --category bottle --eval --promote
+       docker compose run --rm api python scripts/training.py --category bottle --eval
 
   5. Prédire :
        curl -X POST localhost:8000/predict \

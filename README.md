@@ -96,8 +96,8 @@ docker compose up -d --build
 # 4. Ingérer les images (--category pour aller vite ; sans : ~4,9 Go, 5-10 min)
 docker compose run --rm api python scripts/ingest_data.py --category bottle
 
-# 5. Entraîner + promouvoir le champion
-docker compose run --rm api python scripts/training.py --category bottle --eval --promote
+# 5. Entraîner (promotion automatique du champion)
+docker compose run --rm api python scripts/training.py --category bottle --eval
 
 # 6. Prédire
 curl -X POST localhost:8000/predict \
@@ -175,7 +175,7 @@ docker compose down
 - Lancer les CLI **dans** le conteneur (accès MinIO + serveur MLflow) :
   ```bash
   docker compose run --rm api python scripts/ingest_data.py --category bottle
-  docker compose run --rm api python scripts/training.py --category bottle --eval --promote
+  docker compose run --rm api python scripts/training.py --category bottle --eval
   docker compose run --rm api python scripts/predict.py --category bottle --key raw/bottle/test/good/000.png
   ```
 - **Multi-plateformes** : le même `Dockerfile` sert `linux/amd64`
@@ -386,12 +386,16 @@ mlflow ui --backend-store-uri sqlite:///mlflow.db --port 5050
 PaDiM n'étant pas un modèle scikit-learn/keras, il est exposé comme modèle MLflow
 standard via un flavor **`pyfunc`** (`core/padim_flavor.py`, qui réutilise
 `core/padim.py`). Chaque entraînement crée une **version** du registered model
-`padim-<catégorie>` taguée `candidate` ; avec `--promote`, l'AUC est comparée à
-celle du `champion` en place et la nouvelle version est promue si elle est meilleure.
+`padim-<catégorie>` taguée `candidate`, puis **promue automatiquement** en `champion`
+si son AUC est au moins égale à celle du champion en place (à égalité, la version la
+plus récente devient championne). Nécessite `--eval` ; `--no-promote` pour désactiver.
 
 ```bash
-# entraîne, enregistre une version, et promeut si meilleure
-python scripts/training.py --category bottle --eval --run-name bottle-full --promote
+# entraîne, enregistre une version, et promeut automatiquement si meilleure
+python scripts/training.py --category bottle --eval --run-name bottle-full
+
+# ne pas toucher au champion :
+python scripts/training.py --category bottle --eval --no-promote
 ```
 
 ```python

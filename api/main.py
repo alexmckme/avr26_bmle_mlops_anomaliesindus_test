@@ -42,6 +42,7 @@ class TrainingRequest(BaseModel):
     fraction: Optional[float] = Field(default=None, gt=0.0, le=1.0)
     img_size: int = Field(default=padim.IMG_SIZE)
     eval: bool = False                               # AUC + seuil sur le split test
+    promote: bool = True                             # promouvoir en 'champion' si meilleur
 
 
 def _category_exists(category: str) -> bool:
@@ -111,6 +112,8 @@ def training(req: TrainingRequest) -> dict:
             meta["mlflow_run_id"] = info["run_id"]
             if info.get("model_version") is not None:
                 meta["mlflow_model_version"] = info["model_version"]
+            if req.promote:
+                meta["mlflow_promotion"] = tracking.promote_if_better(f"padim-{category}")
     return meta
 
 

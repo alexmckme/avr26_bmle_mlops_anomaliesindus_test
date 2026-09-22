@@ -165,6 +165,8 @@ def promote_if_better(registered_model: str, metric: str = "auc", alias: str = "
                       candidate_alias: str = "candidate") -> dict:
     """Promeut `candidate` en `champion` si sa métrique est >= celle du champion.
 
+    À métrique égale, la version la plus récente devient championne. Refuse la
+    promotion si la métrique est absente (entraînement sans évaluation).
     Réponse au besoin « charger la version précédente et comparer avec la nouvelle ».
     """
     import mlflow
@@ -176,6 +178,15 @@ def promote_if_better(registered_model: str, metric: str = "auc", alias: str = "
         return {"promoted": False, "reason": f"pas de version '{candidate_alias}'"}
 
     cand_score = client.get_run(candidate.run_id).data.metrics.get(metric)
+    if cand_score is None:
+        return {
+            "promoted": False,
+            "registered_model": registered_model,
+            "metric": metric,
+            "candidate_version": candidate.version,
+            "reason": f"métrique '{metric}' absente sur la version candidate "
+                      f"(relancer l'entraînement avec l'évaluation)",
+        }
 
     champion = None
     try:
@@ -184,8 +195,8 @@ def promote_if_better(registered_model: str, metric: str = "auc", alias: str = "
         champion = None
     champ_score = client.get_run(champion.run_id).data.metrics.get(metric) if champion else None
 
-    better = champion is None or (cand_score is not None
-                                  and (champ_score is None or cand_score >= champ_score))
+    # À métrique égale, la version la plus récente devient championne (>=)
+    better = champion is None or champ_score is None or cand_score >= champ_score
     if better:
         client.set_registered_model_alias(registered_model, alias, candidate.version)
 
