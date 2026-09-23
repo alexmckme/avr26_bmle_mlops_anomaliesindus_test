@@ -414,6 +414,50 @@ def predict_image(image_data: bytes, model: PadimModel) -> tuple:
     return float(anomaly.max()), anomaly
 
 
+def _colorize(norm: np.ndarray) -> np.ndarray:
+    """Colormap bleu -> vert -> jaune -> rouge (numpy seul, sans matplotlib)."""
+    stops = np.array([[0.10, 0.30, 0.90],
+                      [0.10, 0.80, 0.45],
+                      [0.95, 0.90, 0.15],
+                      [0.90, 0.15, 0.15]], dtype=np.float32)
+    positions = np.array([0.0, 0.35, 0.70, 1.0], dtype=np.float32)
+    return np.stack([np.interp(norm, positions, stops[:, c]) for c in range(3)], axis=-1)
+
+
+def anomaly_overlay(image_data: bytes, heatmap: np.ndarray,
+                    img_size: int = IMG_SIZE, alpha: float = 0.45,
+                    max_size: int = 640) -> bytes:
+    """Superpose la carte d'anomalie à l'image d'origine -> PNG (bytes).
+
+    Une seule implémentation, partagée par `scripts/predict.py --heatmap` et par
+    l'API (`/predict` + heatmap) : le rendu est donc identique partout, comme pour
+    le reste du preprocessing (anti train/serve skew).
+
+    L'image de fond garde sa **résolution d'origine** (bornée à `max_size` px) et
+    la carte, calculée en `img_size` px, est agrandie par-dessus : l'œil voit
+    nettement la zone suspecte. Le plafond de 640 px limite le poids du PNG
+    renvoyé en base64 par l'API (~200 Ko au lieu de ~550 Ko en 900×900).
+    """
+    with Image.open(io.BytesIO(image_data)) as handle:
+        base = handle.convert("RGB")
+    if max_size and max(base.size) > max_size:
+        ratio = max_size / max(base.size)
+        base = base.resize((max(1, int(base.width * ratio)),
+                            max(1, int(base.height * ratio))), Image.BILINEAR)
+
+    values = np.asarray(heatmap, dtype=np.float32)
+    low, high = float(values.min()), float(values.max())
+    norm = (values - low) / (high - low) if high > low else np.zeros_like(values)
+
+    colored = Image.fromarray((_colorize(norm) * 255).astype(np.uint8))
+    if colored.size != base.size:
+        colored = colored.resize(base.size, Image.BILINEAR)
+
+    buffer = io.BytesIO()
+    Image.blend(base, colored, alpha=alpha).save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
 def _optimal_threshold(y_true, scores) -> float | None:
     """Seuil Youden (max tpr - fpr) à partir des scores du split test."""
     from sklearn.metrics import roc_curve

@@ -28,3 +28,18 @@ def ensure_bucket(client: Minio, bucket: str) -> bool:
     client.make_bucket(bucket)
     print(f"[INFO] Bucket créé : {bucket}")
     return True
+
+
+def list_categories(client: Minio, bucket: str, prefix: str = "raw/") -> list:
+    """Catégories présentes dans le bucket (1 seul appel, listing par préfixe).
+
+    Utilisé par `GET /models` : on veut savoir ce qu'on peut entraîner sans
+    lister les 5 000 images une par une (avec `recursive=False`, MinIO renvoie
+    directement les « dossiers »).
+    """
+    categories = []
+    for obj in client.list_objects(bucket, prefix=prefix, recursive=False):
+        name = obj.object_name[len(prefix):].strip("/")
+        if name:
+            categories.append(name)
+    return sorted(categories)

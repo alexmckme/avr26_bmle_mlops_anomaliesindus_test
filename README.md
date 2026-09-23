@@ -20,6 +20,7 @@ d'anomalies industrielles (dataset [MVTec AD](https://www.mvtec.com/company/rese
 - [x] Orchestration Airflow (profil `airflow`) : DAG planifié qui déclenche `/training`
 - [x] Monitoring Prometheus + Grafana (profil `monitoring`) : `/metrics`, dashboards, alertes
 - [x] Versioning code + données : commit git par run, manifeste des images, index `datasets.json`
+- [x] Interface de démonstration Streamlit (client HTTP de l'API, carte d'anomalie)
 - [ ] À venir : détection de dérive des données (comparaison de distributions)
 
 ## Architecture des données
@@ -62,7 +63,10 @@ flowchart LR
 │   ├── predict.py      #   prédiction CLI (image locale ou clé MinIO)
 │   └── reset_demo.sh   #   remise à zéro pour une démo « live »
 ├── api/
-│   └── main.py         #   FastAPI : POST /training et POST /predict
+│   └── main.py         #   FastAPI : /training, /predict, /models, /runs, /metrics
+├── streamlit_app/
+│   ├── app.py          #   interface de démonstration (5 pages)
+│   └── api_client.py   #   client HTTP de l'API (aucune logique ML)
 ├── airflow/dags/
 │   └── training_pipeline.py # DAG Airflow : appelle POST /training (planifié)
 ├── monitoring/
@@ -70,6 +74,9 @@ flowchart LR
 │   └── grafana/        #   provisioning + dashboard (dashboards as code)
 ├── docker/mlflow/
 │   └── Dockerfile      #   image du serveur MLflow (tracking + registry)
+├── docker/streamlit/
+│   ├── Dockerfile      #   image de l'UI (client HTTP, sans TensorFlow)
+│   └── requirements.txt
 ├── Dockerfile          # image de l'API (FastAPI + TensorFlow)
 ├── docker-compose.yml  # stack : minio + mlflow + api (+ airflow/monitoring via profils)
 ├── start_minio.sh      # (mode natif) démarre MinIO sur l'hôte
@@ -167,7 +174,7 @@ Après démarrage :
 
 ## Démarrage avec Docker (stack complète)
 
-Alternative au mode natif : `docker compose` lance les 3 services du cœur applicatif
+Alternative au mode natif : `docker compose` lance le cœur applicatif
 (`airflow` et `monitoring` sont optionnels, derrière des profils : voir les sections
 Orchestration et Monitoring).
 
@@ -180,14 +187,15 @@ docker compose logs -f api
 docker compose down
 ```
 
-| Service      | URL (hôte)                                                  | Rôle                                          |
-| ------------ | ----------------------------------------------------------- | --------------------------------------------- |
-| `api`        | http://localhost:8000/docs                                  | FastAPI (`/training`, `/predict`, `/metrics`) |
-| `minio`      | http://localhost:9200 (console) · `localhost:9100` (API S3) | images + artefacts                            |
-| `mlflow`     | http://localhost:5050                                       | tracking + Model Registry                     |
-| `airflow`    | http://localhost:8080 (profil `airflow`, admin/admin)       | orchestration du ré-entraînement              |
-| `prometheus` | http://localhost:9090 (profil `monitoring`)                 | collecte des métriques                        |
-| `grafana`    | http://localhost:3000 (profil `monitoring`, admin/admin)    | tableaux de bord et alertes                   |
+| Service      | URL (hôte)                                                  | Rôle                                                              |
+| ------------ | ----------------------------------------------------------- | ----------------------------------------------------------------- |
+| `api`        | http://localhost:8000/docs                                  | FastAPI (`/training`, `/predict`, `/models`, `/runs`, `/metrics`) |
+| `streamlit`  | http://localhost:8501                                       | interface de démonstration                                        |
+| `minio`      | http://localhost:9200 (console) · `localhost:9100` (API S3) | images + artefacts                                                |
+| `mlflow`     | http://localhost:5050                                       | tracking + Model Registry                                         |
+| `airflow`    | http://localhost:8080 (profil `airflow`, admin/admin)       | orchestration du ré-entraînement                                  |
+| `prometheus` | http://localhost:9090 (profil `monitoring`)                 | collecte des métriques                                            |
+| `grafana`    | http://localhost:3000 (profil `monitoring`, admin/admin)    | tableaux de bord et alertes                                       |
 
 - Les conteneurs **réutilisent tes données** : `./minio-data` (images + artefacts),
   `./mlflow.db` (historique des runs) et `./models` (cache du champion).
@@ -464,6 +472,48 @@ Exemple validé (`bottle`) : `/training` renvoie `auc = 0.9992` et un seuil de
 `38 048 944` ; `/predict` renvoie `anomaly: false` sur une image saine et
 `anomaly: true` sur une image `broken_large`.
 
+## Interface de démonstration (Streamlit)
+
+Objectif : rendre la démonstration confortable **sans dupliquer de logique ML**.
+L'application est un **client HTTP de l'API** (`streamlit_app/api_client.py`) : elle
+n'importe ni `core`, ni TensorFlow. Conséquences : image légère et démarrage en
+quelques secondes, rendu strictement identique à la CLI et à l'API, et si l'API est
+arrêtée l'interface l'affiche au lieu de planter.
+
+```bash
+docker compose up -d            # streamlit fait partie du cœur applicatif
+# UI : http://localhost:8501
+```
+
+| Page                     | Ce qu'elle montre                                                                                                    |
+| ------------------------ | -------------------------------------------------------------------------------------------------------------------- |
+| **Prédiction**           | une image (téléversée ou choisie dans le jeu de test) → verdict, score/seuil et **carte d'anomalie superposée**      |
+| **Test par lot**         | N images enchaînées via `/predict` → tableau, taux de bonnes réponses, distribution des scores                       |
+| **Entraînement**         | déclenche `POST /training` (version de données, évaluation, registre, promotion) et affiche la décision de promotion |
+| **Modèle & traçabilité** | champion par catégorie (AUC, commit du code, empreinte du dataset) et derniers runs                                  |
+| **Monitoring**           | voyants des services, liens MLflow/Grafana/Airflow/MinIO, métriques clés de `/metrics`                               |
+
+Pour rendre ces pages possibles sans embarquer MLflow côté interface, deux endpoints
+de **lecture** ont été ajoutés à l'API :
+
+| Endpoint                     | Contenu                                                                                                    |
+| ---------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `GET /models`                | catégories présentes dans MinIO + champion/candidate de chacune (AUC, seuil, commit, empreinte du dataset) |
+| `GET /runs`                  | derniers runs d'entraînement (métriques + traçabilité)                                                     |
+| `POST /predict?heatmap=true` | ajoute `heatmap_png` (carte d'anomalie superposée, PNG base64)                                             |
+
+Le rendu de la carte (`core.padim.anomaly_overlay`) est **partagé** avec
+`scripts/predict.py --heatmap` : un seul code, donc un seul rendu possible.
+
+`./streamlit_app` est monté en volume : on peut modifier une page et la recharger
+sans reconstruire l'image (Streamlit détecte le changement de fichier).
+
+Lancer l'interface hors Docker (venv + `pip install streamlit requests`) :
+
+```bash
+API_BASE_URL=http://localhost:8000 streamlit run streamlit_app/app.py
+```
+
 ## Versioning (code + données)
 
 Deux questions à pouvoir trancher à tout moment, sur le modèle servi :
@@ -490,11 +540,11 @@ Chaque run porte le commit dans ses **params** (`git_commit`, `git_branch`,
 `git_dirty`), dans ses **tags**, et sur la **version du Registry**. Résolution en
 cascade :
 
-| Source | Contexte | Remarque |
-| ------ | -------- | -------- |
-| variable `GIT_COMMIT` | CI / build | prioritaire (stamp de build) |
-| `git rev-parse` | hôte | donne aussi `git_dirty` (modifs non commitées) |
-| lecture de `.git/HEAD` | conteneur | pas de binaire git dans l'image : `./.git` est monté en lecture seule |
+| Source                 | Contexte   | Remarque                                                              |
+| ---------------------- | ---------- | --------------------------------------------------------------------- |
+| variable `GIT_COMMIT`  | CI / build | prioritaire (stamp de build)                                          |
+| `git rev-parse`        | hôte       | donne aussi `git_dirty` (modifs non commitées)                        |
+| lecture de `.git/HEAD` | conteneur  | pas de binaire git dans l'image : `./.git` est monté en lecture seule |
 
 `git_dirty` reste inconnu dans le conteneur (aucun binaire git) : c'est la seule
 limite, et elle est assumée. Le reste — commit, branche — est exact.
@@ -508,10 +558,19 @@ c'est la correspondance **run -> images**.
 {
   "dataset_sha256": "e9f44bc1558326561331c73c4c3c3f453bef890a0ffa2bbcc3e8b32624a6d09f",
   "fingerprint_matches": true,
-  "selection": {"data_version": 0, "fraction": 0.201, "n_images": 42, "total_available": 209},
-  "code": {"commit": "48e801a35028", "branch": "main", "source": "dot-git"},
+  "selection": {
+    "data_version": 0,
+    "fraction": 0.201,
+    "n_images": 42,
+    "total_available": 209
+  },
+  "code": { "commit": "48e801a35028", "branch": "main", "source": "dot-git" },
   "images": [
-    {"id": "raw/bottle/train/good/000.png", "size": 532823, "etag": "55573ccce4c8…"}
+    {
+      "id": "raw/bottle/train/good/000.png",
+      "size": 532823,
+      "etag": "55573ccce4c8…"
+    }
   ]
 }
 ```
@@ -571,7 +630,7 @@ mais évidemment incomplète pour l'historique.
 
 - Dans le conteneur, `datasets.json` est un **bind mount** : `os.replace()` vers un
   point de montage échoue (`EBUSY — Device or resource busy`). L'écriture est donc
-  atomique *quand c'est possible*, sinon en place — acceptable car l'index est un
+  atomique _quand c'est possible_, sinon en place — acceptable car l'index est un
   fichier **dérivé** : les runs MLflow et leurs manifestes restent la source de
   vérité.
 

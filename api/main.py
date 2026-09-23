@@ -16,6 +16,7 @@ Lancement (dev) :
 
 from __future__ import annotations
 
+import base64
 import sys
 import time
 from contextlib import asynccontextmanager
@@ -93,7 +94,28 @@ def _model_path_for(category: str) -> tuple[Path, str]:
 @app.get("/")
 def root() -> dict:
     return {"app": "anomalies-indus", "version": app.version,
-            "endpoints": ["/training", "/predict", "/metrics"]}
+            "endpoints": ["/training", "/predict", "/models", "/runs", "/metrics"]}
+
+
+@app.get("/models")
+def models() -> dict:
+    """Catégories connues + qualité et provenance du modèle servi (lecture Registry)."""
+    from core import storage, tracking
+
+    tracking.setup_mlflow()
+    return {
+        "categories": storage.list_categories(client, settings.minio_bucket),
+        "models": tracking.list_champions(),
+    }
+
+
+@app.get("/runs")
+def runs(limit: int = 20, category: Optional[str] = None) -> dict:
+    """Derniers runs d'entraînement (métriques + traçabilité code/données)."""
+    from core import tracking
+
+    tracking.setup_mlflow()
+    return {"runs": tracking.recent_runs(limit=limit, category=category)}
 
 
 @app.post("/training")
@@ -165,7 +187,10 @@ def training(req: TrainingRequest) -> dict:
 
 
 @app.post("/predict")
-async def predict(category: str = Form(...), file: UploadFile = File(...)) -> dict:
+async def predict(category: str = Form(...), file: UploadFile = File(...),
+                  heatmap: bool = Form(False)) -> dict:
+    """Score d'anomalie d'une image. `heatmap=true` renvoie aussi la carte
+    d'anomalie superposée (PNG en base64)."""
     category = category.strip()
     model_path, model_source = _model_path_for(category)
     model = padim.load_model(model_path)
@@ -174,7 +199,7 @@ async def predict(category: str = Form(...), file: UploadFile = File(...)) -> di
     if not data:
         raise HTTPException(status_code=400, detail="Fichier image vide.")
     try:
-        score, _ = padim.predict_image(data, model)
+        score, anomaly_map = padim.predict_image(data, model)
     except Exception as exc:  # noqa: BLE001 — image invalide
         raise HTTPException(status_code=422, detail=f"Image illisible : {exc}") from exc
 
@@ -186,6 +211,9 @@ async def predict(category: str = Form(...), file: UploadFile = File(...)) -> di
         "threshold": model.threshold,
         "anomaly": bool(score > model.threshold) if model.threshold is not None else None,
     }
+    if heatmap:
+        png = padim.anomaly_overlay(data, anomaly_map, img_size=model.img_size)
+        result["heatmap_png"] = base64.b64encode(png).decode("ascii")
     # Monitoring : verdict, distribution des scores, et score/seuil (indépendant de
     # l'échelle) — c'est le signal qui permet de détecter une dérive des données.
     metrics.observe_prediction(category, float(score), model.threshold, result["anomaly"])

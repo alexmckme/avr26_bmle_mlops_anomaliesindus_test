@@ -24,8 +24,6 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from PIL import Image
-
 import core.padim as padim
 
 
@@ -39,19 +37,6 @@ def _read_image_bytes(args) -> bytes:
     settings = load_settings()
     client = get_client(settings)
     return client.get_object(settings.minio_bucket, args.key).read()
-
-
-def _save_heatmap(heatmap, out_path: Path, size: int) -> str:
-    """Sauvegarde la heatmap d'anomalie en PNG (niveaux de gris normalisés)."""
-    hm = heatmap.astype("float32")
-    lo, hi = float(hm.min()), float(hm.max())
-    norm = (hm - lo) / (hi - lo + 1e-12)
-    img = Image.fromarray((norm * 255).astype("uint8"))
-    if img.size != (size, size):
-        img = img.resize((size, size), Image.BILINEAR)
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    img.save(out_path)
-    return str(out_path)
 
 
 def main() -> int:
@@ -111,7 +96,11 @@ def main() -> int:
         "anomaly": anomaly,
     }
     if args.heatmap:
-        result["heatmap"] = _save_heatmap(heatmap, Path(args.heatmap), model.img_size)
+        # Même rendu que `/predict` (heatmap=true) : une seule implémentation.
+        out_path = Path(args.heatmap)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_bytes(padim.anomaly_overlay(data, heatmap, model.img_size))
+        result["heatmap"] = str(out_path)
 
     if args.json:
         print(json.dumps(result, indent=2, ensure_ascii=False))

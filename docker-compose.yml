@@ -2,7 +2,8 @@
 #
 #   minio   : object store S3 (images MVTec + artefacts MLflow)
 #   mlflow  : serveur de tracking + Model Registry (backend SQLite, artefacts MinIO)
-#   api     : FastAPI (/training, /predict, /metrics)
+#   api     : FastAPI (/training, /predict, /models, /runs, /metrics)
+#   streamlit : interface de démonstration (client HTTP de l'api)
 #   airflow : orchestration du ré-entraînement (profil « airflow », voir plus bas)
 #   prometheus + grafana : monitoring (profil « monitoring », voir plus bas)
 #
@@ -97,6 +98,38 @@ services:
       minio:
         condition: service_healthy
       mlflow:
+        condition: service_started
+    restart: unless-stopped
+
+  # ── Interface de démonstration (Streamlit) ─────────────────
+  # Client HTTP de l'API : aucune logique ML ici, donc image légère (sans
+  # TensorFlow) et démarrage en quelques secondes.
+  #   UI : http://localhost:8501
+  streamlit:
+    build:
+      context: .
+      dockerfile: docker/streamlit/Dockerfile
+    environment:
+      # Appels du conteneur vers l'API (réseau interne Docker)
+      API_BASE_URL: http://api:8000
+      DATASET_DIR: dataset/raw # jeu de test local affiché dans l'UI
+      # Vérifications d'état faites depuis le conteneur (réseau interne)
+      PROMETHEUS_URL: http://prometheus:9090
+      MLFLOW_INTERNAL_URL: http://mlflow:5000
+      AIRFLOW_INTERNAL_URL: http://airflow:8080
+      # Liens affichés à l'utilisateur (ouverts depuis son navigateur)
+      MLFLOW_URL: http://localhost:5050
+      GRAFANA_URL: http://localhost:3000
+      AIRFLOW_URL: http://localhost:8080
+      MINIO_CONSOLE_URL: http://localhost:9200
+      API_DOCS_URL: http://localhost:8000/docs
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./streamlit_app:/app/streamlit_app:ro # édition à chaud, sans rebuild
+      - ./dataset/raw:/app/dataset/raw:ro # images du jeu de test
+    depends_on:
+      api:
         condition: service_started
     restart: unless-stopped
 

@@ -1,0 +1,6 @@
+# Dépendances de l'interface de démonstration uniquement.
+# Pas de TensorFlow / MLflow / MinIO : l'app appelle l'API en HTTP (voir
+# streamlit_app/api_client.py). C'est ce qui garde l'image légère.
+streamlit>=1.40,<2.0
+requests>=2.31
+pandas>=2.0

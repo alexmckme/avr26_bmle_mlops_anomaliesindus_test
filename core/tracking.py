@@ -159,6 +159,85 @@ def log_training(meta: dict, artifact_path: str, run_name: str | None = None,
         }
 
 
+def describe_alias(registered_model: str, alias: str = "champion") -> dict | None:
+    """Métadonnées d'une version du Registry (sans télécharger l'artefact).
+
+    Retourne {alias, version, run_id, status, auc, threshold, n_train,
+    data_version, git_commit, dataset_sha256} ou None si l'alias n'existe pas.
+    """
+    if not _ENABLED:
+        return None
+    import mlflow
+
+    client = mlflow.MlflowClient()
+    try:
+        version = client.get_model_version_by_alias(registered_model, alias)
+    except Exception:  # noqa: BLE001 — alias inexistant
+        return None
+
+    run = client.get_run(version.run_id)
+    info = {
+        "alias": alias,
+        "version": version.version,
+        "run_id": version.run_id,
+        "status": version.status,
+        "auc": run.data.metrics.get("auc"),
+        "threshold": run.data.metrics.get("threshold"),
+        "n_train": run.data.params.get("n_train"),
+        "data_version": run.data.params.get("data_version"),
+    }
+    for key in ("git_commit", "dataset_sha256"):
+        info[key] = version.tags.get(key) or run.data.tags.get(key)
+    return info
+
+
+def list_champions(prefix: str = "padim-") -> list[dict]:
+    """Une entrée par catégorie : champion et candidate (lecture seule)."""
+    if not _ENABLED:
+        return []
+    import mlflow
+
+    client = mlflow.MlflowClient()
+    entries = []
+    for registered in client.search_registered_models():
+        if not registered.name.startswith(prefix):
+            continue
+        entries.append({
+            "category": registered.name[len(prefix):],
+            "registered_model": registered.name,
+            "champion": describe_alias(registered.name, "champion"),
+            "candidate": describe_alias(registered.name, "candidate"),
+        })
+    return sorted(entries, key=lambda e: e["category"])
+
+
+def recent_runs(limit: int = 20, category: str | None = None) -> list[dict]:
+    """Derniers runs de l'expérience (métriques + provenance)."""
+    if not _ENABLED:
+        return []
+    import mlflow
+
+    client = mlflow.MlflowClient()
+    experiment = client.get_experiment_by_name(os.getenv("MLFLOW_EXPERIMENT", "anomalies-indus"))
+    if experiment is None:
+        return []
+
+    where = f"params.category = '{category}'" if category else ""
+    runs = client.search_runs([experiment.experiment_id], filter_string=where,
+                              order_by=["start_time DESC"], max_results=limit)
+    return [{
+        "run_id": run.info.run_id,
+        "name": run.data.tags.get("mlflow.runName", ""),
+        "status": run.info.status,
+        "start_time": run.info.start_time,
+        "auc": run.data.metrics.get("auc"),
+        "data_version": run.data.params.get("data_version"),
+        "n_train": run.data.params.get("n_train"),
+        "git_commit": run.data.params.get("git_commit") or run.data.tags.get("git_commit"),
+        "dataset_sha256": run.data.tags.get("dataset_sha256"),
+    } for run in runs]
+
+
 def _tag_model_version(registered_model: str, version, meta: dict) -> None:
     """Pose la provenance (code + dataset) sur une version du Registry.
 
