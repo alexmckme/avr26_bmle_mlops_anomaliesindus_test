@@ -58,6 +58,21 @@ def main() -> int:
           f"({run.data.params.get('n_train', '?')} images d'entraînement)")
     print(f"  dataset_sha256 : {sha}")
 
+    # Verdict de promotion tracé sur le run (voir core.tracking.log_promotion)
+    promoted = run.data.tags.get("promotion.promoted")
+    prev_version = run.data.tags.get("promotion.previous_champion_version") or "—"
+    prev_score = run.data.tags.get("promotion.previous_champion_score") or "—"
+    if promoted == "true":
+        print(f"  promotion      : 🏆 promue champion "
+              f"(champion précédent v{prev_version}, AUC {prev_score})")
+    elif promoted == "false":
+        print(f"  promotion      : non promue — "
+              f"{run.data.tags.get('promotion.reason') or 'candidate moins bonne'} "
+              f"(candidate {run.data.tags.get('promotion.candidate_score')} "
+              f"vs champion {prev_score})")
+    else:
+        print("  promotion      : (run non comparé au champion)")
+
     # 1) Index du repo : ce que représente cette empreinte
     entry = versioning.read_dataset_index().get("datasets", {}).get(sha)
     if entry:

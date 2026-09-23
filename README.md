@@ -465,6 +465,47 @@ téléchargé depuis MinIO vers `models/<catégorie>.champion.npz` (+ fichier
 `.version`) ; les appels suivants réutilisent le cache tant que la version n'a
 pas changé. Le client expose l'origine via `model_source` (`registry`/`local`).
 
+### Où le modèle est-il écrit ?
+
+| Emplacement                                           | Condition                                                                                        |
+| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `models/<cat>.p<NN>.npz` (bind-mount `./models`)      | **toujours** — le nom porte le **pourcentage** du train set (`p30` = 30 %), pas le n° de version |
+| Artefacts du run MLflow (bucket MinIO `mlflow`)       | `register: true` (CLI : défaut) — pyfunc + `metadata.json` + `dataset_manifest.json`             |
+| Version du Registry `padim-<cat>` (alias `candidate`) | `register: true` **et** `--eval` — puis promotion automatique en `champion`                      |
+| `models/<cat>.champion.npz`                           | **paresseux** — au premier `/predict` de la catégorie (cache)                                    |
+
+Les trois déclencheurs (CLI, `POST /training`, tâche `train` du DAG Airflow — qui n'est
+qu'un `curl` sur `POST /training`) passent par le même `core/` : l'artefact local est
+donc écrit **dans tous les cas**, seule la partie Registry dépend de `register`.
+
+> Le fichier local est nommé d'après la **fraction**, pas d'après la version : un
+> ré-entraînement à la même fraction **écrase** le fichier (l'horodatage change), et
+> `bottle.npz` (sans suffixe) n'existe que pour un entraînement à **100 %**.
+
+### Suivre la promotion d'un modèle
+
+`promote_if_better()` est appelé **après** `log_training()` (le run est donc déjà
+fermé) : le verdict est ré-écrit sur le run par `log_promotion()`, sinon il ne vivrait
+que dans la réponse HTTP de `POST /training`.
+
+| Où                               | Ce qu'on y voit                                                                                                                      |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| MLflow → run → onglet **Tags**   | `promotion.promoted`, `promotion.reason`, `promotion.candidate_version` / `_score`, `promotion.previous_champion_version` / `_score` |
+| MLflow → run → **Artifacts**     | `promotion.json` (verdict complet) + `metadata.json` (ré-écrit avec `mlflow_promotion`)                                              |
+| MLflow → Models → la version     | alias : `champion` **et** `candidate` = promue ; `candidate` seul = non promue                                                       |
+| Airflow → tâche `train` → log    | la réponse JSON de `POST /training` (le `curl` du DAG n'est pas muet)                                                                |
+| Grafana / Prometheus             | `anomalies_champion_promotions_total{category, promoted}`                                                                            |
+| Streamlit → Modèle & traçabilité | colonne « promu » du tableau des runs (🏆 oui / non / —)                                                                             |
+
+```python
+import mlflow
+mlflow.search_runs(filter_string="tags.promotion.promoted = 'true'")   # les runs promus
+```
+
+> `scripts/lineage.py` résume le verdict quand tu remontes depuis le champion :
+> `promotion : 🏆 promue champion (champion précédent v12, AUC 0.9992)`, ou
+> `non promue — candidate moins bonne que le champion (0.7736 < 0.8566)`.
+
 ## API FastAPI
 
 L'API expose l'entraînement et l'inférence en réutilisant `core.*` (le même code

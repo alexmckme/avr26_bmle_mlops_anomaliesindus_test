@@ -126,6 +126,11 @@ def metric_label(key: str) -> str:
     return " ".join([name.replace("anomalies_", "")] + labels)
 
 
+def promoted_label(value: str | None) -> str:
+    """Tag MLflow `promotion.promoted` -> libellé lisible (None = run non comparé)."""
+    return {"true": "🏆 oui", "false": "non"}.get(value or "", "—")
+
+
 # ─────────────────────────────────────────────────────────────
 # 1. Prédiction
 # ─────────────────────────────────────────────────────────────
@@ -385,6 +390,7 @@ def page_model() -> None:
         "catégorie": r["name"],
         "statut": r["status"],
         "AUC": r["auc"],
+        "promu": promoted_label(r.get("promoted")),
         "images train": r["n_train"],
         "data_version": r["data_version"] or "—",
         "commit": (r["git_commit"] or "—")[:12],

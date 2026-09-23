@@ -219,6 +219,39 @@ inhabituelle, qualité du champion) — visibles dans l'onglet _Alerts_ de Prome
 | `models/`        | Cache local des modèles (`<cat>.p30.npz` = 30 %) + champion téléchargé (non versionné)                                                                                                                        |
 | `mlflow.db`      | Historique des runs MLflow (non versionné)                                                                                                                                                                    |
 
+### Où va le modèle entraîné ? (les 4 emplacements)
+
+Un entraînement écrit **toujours** un artefact local, quel que soit le déclencheur : CLI
+`scripts/training.py`, `POST /training` depuis Streamlit, ou tâche `train` du DAG Airflow
+(qui n'est qu'un `curl` sur `POST /training` — donc _le même code_) :
+
+| #   | Emplacement                                      | Quand                                                                                |
+| --- | ------------------------------------------------ | ------------------------------------------------------------------------------------ |
+| 1   | `models/<cat>.p<NN>.npz` (bind-mount)            | **toujours** — `p30` = 30 % du train set, `bottle.npz` = 100 %                       |
+| 2   | Artefacts du run MLflow (bucket `mlflow`)        | si `register: true` : modèle pyfunc + `metadata.json` + `dataset_manifest.json`      |
+| 3   | Model Registry `padim-<cat>` (alias `candidate`) | si `register: true`, puis promotion automatique en `champion` si l'AUC ne baisse pas |
+| 4   | `models/<cat>.champion.npz`                      | **paresseux** : téléchargé au premier `POST /predict` de la catégorie (cache)        |
+
+> `register: false` (le défaut du run planifié) s'arrête à l'emplacement 1 : run MLflow +
+> fichier local, **aucune** version au Registry. C'est ce qui permet de tourner chaque minute
+> sans remplir MinIO (~260 Mo/run, soit ~15 Go/h).
+>
+> Corollaire : **le nom du fichier porte le pourcentage, pas le numéro de version** — un
+> ré-entraînement à la même fraction **écrase** le même fichier (seul l'horodatage change).
+
+**Savoir si le run a été promu** : le verdict est écrit **sur le run MLflow** lui-même
+(`core.tracking.log_promotion`) — tags `promotion.promoted`, `promotion.reason`,
+`promotion.candidate_score` vs `promotion.previous_champion_score`, artéfacts
+`promotion.json` + `metadata.json`, et alias `champion` sur la version. Le log de la tâche
+`train` (Airflow) montre le JSON complet, Grafana compte les promotions
+(`anomalies_champion_promotions_total{category,promoted}`), Streamlit affiche une colonne
+« promu », et `scripts/lineage.py` résume le verdict :
+
+```
+promotion      : 🏆 promue champion (champion précédent v12, AUC 0.9992)
+promotion      : non promue — candidate moins bonne que le champion (0.7736 < 0.8566)
+```
+
 ---
 
 ## 4. Commandes de démo, dans l'ordre
@@ -284,9 +317,10 @@ _À dire :_ « l'entraînement part uniquement des images saines ; l'AUC sert à
 promouvoir automatiquement le champion ».
 
 > **État constaté au moment d'écrire ce fichier** (démo prête à l'emploi) :
-> champion `bottle` **v12**, AUC 0,9992, 209 images (100 %), commit tracé ;
-> `good/000.png` → **0,19×** le seuil (saine) ; `broken_large/000.png` → **8,89×**
-> (ANOMALIE) ; lot de 8 `broken_large` → **8/8** détectées.
+> champion `bottle` **v15**, AUC 0,9992, 209 images (100 %), commit tracé, promu
+> (tags `promotion.promoted: true`) ; `good/000.png` → **0,19×** le seuil (saine) ;
+> `broken_large/000.png` → **8,89×** (ANOMALIE) ; lot de 8 `broken_large` → **8/8**
+> détectées.
 
 #### 3.2 Prédiction (Streamlit, http://localhost:8501)
 
@@ -314,6 +348,7 @@ du seuil).
 | ----------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
 | Onglet **Entraînement** → `bottle`, `v2 — 30 %`, éval + registre + promotion → **Lancer** | AUC ≈ 0,997 → version enregistrée, **pas** de promotion (moins bonne que le champion) |
 | Relancer avec `v9 — 100 %`                                                                | AUC ≈ 0,9992 → **« 🏆 Nouveau champion »**                                            |
+| MLflow (http://localhost:5050) → le dernier run → onglet **Tags**                         | `promotion.promoted` + `promotion.reason` : le verdict est **tracé et filtrable**     |
 
 _À dire :_ « la même commande est disponible en CLI et dans l'API : `--data-version` /
 `data_version` ; la promotion est un **garde-fou automatique**, pas une décision
@@ -351,9 +386,14 @@ docker compose exec airflow airflow dags pause training_pipeline     # à la fin
 Déclencher **un run complet** à la main (Registry + promotion) :
 
 ```bash
+docker compose exec airflow airflow dags unpause training_pipeline   # ⚠️ indispensable
 docker compose exec airflow airflow dags trigger training_pipeline \
   -c '{"category": "bottle", "data_version": 9, "eval": true, "register": true}'
+docker compose exec airflow airflow dags pause training_pipeline     # refermer derrière soi
 ```
+
+> ⚠️ Un run déclenché à la main sur un DAG **en pause** reste `queued` et ne s'exécute
+> **jamais** : c'est le scheduler qui doit le prendre en charge. Dé-pause d'abord.
 
 _À dire :_ « Airflow ne fait que de l'orchestration : ses tâches sont deux `curl`.
 Le run planifié est volontairement allégé (`register: false`) pour ne pas écrire
@@ -410,6 +450,8 @@ et ne touche pas à `datasets.json` (fichier d'historique committé).
 | Le premier build est très long                               | téléchargement de TensorFlow                                                                                                    | cache pip persistant (déjà configuré)                                                                                                                                 |
 | L'UI Streamlit ne montre pas mes modifications               | Streamlit exécute encore l'ancien code                                                                                          | bandeau _File change → Rerun_, ou `docker compose restart streamlit`                                                                                                  |
 | Le DAG Airflow ne déclenche rien                             | il est **en pause**                                                                                                             | `docker compose exec airflow airflow dags unpause training_pipeline`                                                                                                  |
+| Un run Airflow manuel reste `queued` indéfiniment            | un run déclenché à la main ne s'exécute que si le DAG est **actif**                                                             | dé-pauser **avant** de déclencher : `airflow dags unpause training_pipeline` (puis re-`pause`)                                                                        |
+| On ne trouve pas le modèle dans `models/`                    | le fichier est nommé d'après le **pourcentage** (`cable.p40.npz`), pas d'après la version Registry                              | chercher `<cat>.p<NN>.npz` ; `cable.npz` n'existe que si entraîné à 100 %                                                                                             |
 | Le champion affiche `?` en traçabilité                       | modèle entraîné avant la fonctionnalité de versioning                                                                           | lancer un run complet (§3.4, `v9 — 100 %` + registre)                                                                                                                 |
 | Grafana : « No data » sur un panneau                         | compteurs remis à zéro au redémarrage de l'API                                                                                  | relancer une prédiction / un entraînement, ou attendre 15 s (scrape)                                                                                                  |
 

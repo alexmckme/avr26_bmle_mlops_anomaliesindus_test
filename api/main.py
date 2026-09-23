@@ -190,6 +190,9 @@ def training(req: TrainingRequest) -> dict:
             if req.register and req.promote:
                 promo = tracking.promote_if_better(f"padim-{category}")
                 meta["mlflow_promotion"] = promo
+                # Tracé sur le run lui-même : sans ça, la promotion n'existerait
+                # que dans cette réponse HTTP (run déjà fermé à ce stade).
+                tracking.log_promotion(info["run_id"], promo, meta=meta)
                 metrics.observe_promotion(category, bool(promo.get("promoted")),
                                           auc=meta.get("auc"))
 

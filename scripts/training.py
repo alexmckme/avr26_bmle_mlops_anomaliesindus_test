@@ -125,7 +125,9 @@ def main() -> int:
                 if info.get("model_version") is not None:
                     meta["mlflow_model_version"] = info["model_version"]
                 if register_model and not args.no_promote:
-                    meta["mlflow_promotion"] = tracking.promote_if_better(register_model)
+                    promo = tracking.promote_if_better(register_model)
+                    meta["mlflow_promotion"] = promo
+                    tracking.log_promotion(info["run_id"], promo, meta=meta)
 
     print("\n" + "=" * 60)
     print("Entraînement PaDiM terminé")

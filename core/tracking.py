@@ -235,6 +235,8 @@ def recent_runs(limit: int = 20, category: str | None = None) -> list[dict]:
         "n_train": run.data.params.get("n_train"),
         "git_commit": run.data.params.get("git_commit") or run.data.tags.get("git_commit"),
         "dataset_sha256": run.data.tags.get("dataset_sha256"),
+        # "true"/"false" si le run a été comparé au champion (voir log_promotion)
+        "promoted": run.data.tags.get("promotion.promoted"),
     } for run in runs]
 
 
@@ -291,6 +293,9 @@ def promote_if_better(registered_model: str, metric: str = "auc", alias: str = "
     À métrique égale, la version la plus récente devient championne. Refuse la
     promotion si la métrique est absente (entraînement sans évaluation).
     Réponse au besoin « charger la version précédente et comparer avec la nouvelle ».
+
+    Le verdict (dont `reason`) est ensuite écrit **sur le run** par
+    `log_promotion()`, pour qu'il soit visible et filtrable dans l'UI MLflow.
     """
     import mlflow
 
@@ -331,7 +336,52 @@ def promote_if_better(registered_model: str, metric: str = "auc", alias: str = "
         "candidate_score": cand_score,
         "previous_champion_version": champion.version if champion else None,
         "previous_champion_score": champ_score,
+        # Explication lisible : reprise telle quelle dans `promotion.reason`
+        # des tags du run et dans la réponse de `POST /training`.
+        "reason": None if better else (
+            f"candidate moins bonne que le champion ({cand_score} < {champ_score})"
+        ),
     }
+
+
+def log_promotion(run_id: str, promo: dict, meta: dict | None = None) -> None:
+    """Écrit le verdict de promotion **sur le run MLflow** qui l'a provoqué.
+
+    `promote_if_better()` est appelé **après** `log_training()` : le run est donc
+    déjà fermé, et sans ces tags il est impossible de répondre à « ce run a-t-il
+    donné un nouveau champion ? » depuis l'UI MLflow (filtre
+    `tags.promotion.promoted = 'true'`).
+
+    - tags `promotion.*` : verdict + comparaison des scores avec le champion ;
+    - artefact `promotion.json` : le verdict complet, relisible ;
+    - `meta` fourni : ré-écrit `metadata.json` pour y inclure la promotion.
+    """
+    if not _ENABLED or not run_id:
+        return
+    import mlflow
+
+    def _val(value) -> str:
+        """Tag MLflow : chaîne vide plutôt que "None" quand l'info manque."""
+        return "" if value is None else _param(value)
+
+    client = mlflow.MlflowClient()
+    tags = {
+        "promotion.promoted": "true" if promo.get("promoted") else "false",
+        "promotion.reason": str(promo.get("reason") or ""),
+        "promotion.metric": _val(promo.get("metric")),
+        "promotion.candidate_version": _val(promo.get("candidate_version")),
+        "promotion.candidate_score": _val(promo.get("candidate_score")),
+        "promotion.previous_champion_version": _val(promo.get("previous_champion_version")),
+        "promotion.previous_champion_score": _val(promo.get("previous_champion_score")),
+    }
+    try:
+        for key, value in tags.items():
+            client.set_tag(run_id, key, value)
+        client.log_dict(run_id, promo, "promotion.json")
+        if meta is not None:
+            client.log_dict(run_id, meta, "metadata.json")
+    except Exception as exc:  # noqa: BLE001 — traçabilité informative, jamais bloquante
+        print(f"[WARN] promotion non tracée sur le run {run_id} : {exc}")
 
 
 # ─────────────────────────────────────────────────────────────

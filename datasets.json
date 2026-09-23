@@ -19,16 +19,34 @@
       "source": "s3://mvtec-ad/raw/cable/train/good/",
       "total_available": 224
     },
+    "7025ebae9d234163ea9c587c770569ce21c5bce2ba7a3b0368accf92f504f01f": {
+      "category": "cable",
+      "first_seen": "2026-09-23T23:26:46+00:00",
+      "full": false,
+      "last_seen": "2026-09-23T23:45:49+00:00",
+      "manifest": "dataset_manifest.json (artefact du run)",
+      "n_images": 90,
+      "runs": {
+        "count": 3,
+        "last_run_id": "edc46c3b1ac541fb8eae5e37b613bf59"
+      },
+      "selection": {
+        "data_version": 3,
+        "fraction": 0.4018
+      },
+      "source": "s3://mvtec-ad/raw/cable/train/good/",
+      "total_available": 224
+    },
     "81d5e420e8b54d372723f997816ddaa9caa0203349a69e3004f0a9ce350d7c66": {
       "category": "bottle",
       "first_seen": "2026-09-23T00:59:55+00:00",
       "full": true,
-      "last_seen": "2026-09-23T00:59:55+00:00",
+      "last_seen": "2026-09-23T23:43:49+00:00",
       "manifest": "dataset_manifest.json (artefact du run)",
       "n_images": 209,
       "runs": {
-        "count": 1,
-        "last_run_id": "1e6fe8189b914ac38fe61c190299d836"
+        "count": 2,
+        "last_run_id": "5773769148894628843f075c56a8a54e"
       },
       "selection": {
         "data_version": 9,
@@ -113,15 +131,15 @@
       "category": "bottle",
       "first_seen": "2026-09-23T00:03:18+00:00",
       "full": false,
-      "last_seen": "2026-09-23T00:03:18+00:00",
+      "last_seen": "2026-09-23T23:25:02+00:00",
       "manifest": "dataset_manifest.json (artefact du run)",
       "n_images": 42,
       "runs": {
-        "count": 1,
-        "last_run_id": "784c417621984dbab41546b250a1cfe8"
+        "count": 2,
+        "last_run_id": "b5a977f234a54c1083763fa13bff91a2"
       },
       "selection": {
-        "data_version": 0,
+        "data_version": 1,
         "fraction": 0.201
       },
       "source": "s3://mvtec-ad/raw/bottle/train/good/",
@@ -147,5 +165,5 @@
     }
   },
   "schema": 1,
-  "updated_at": "2026-09-23T09:13:24+00:00"
+  "updated_at": "2026-09-23T23:45:49+00:00"
 }
