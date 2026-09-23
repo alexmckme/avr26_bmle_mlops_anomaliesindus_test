@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -38,12 +39,11 @@ RIDGE = 1e-6          # régularisation ajoutée à la diagonale des covariances
 BATCH_SIZE = 32
 
 # Grille de croissance simulée du dataset (fractions du corpus « good » dispo).
-# data_version = i -> on garde les premiers round(frac_i * N) images (ordres
-# de tri déterministe) : sous-ensembles imbriqués simulant l'accumulation de
-# données dans le temps (v0 ⊂ v1 ⊂ … ⊂ full). S'applique à toute catégorie,
-# quelle que soit sa taille N.
-DATA_VERSION_FRACTIONS = [0.2, 0.4, 0.6, 0.8, 1.0]
-
+# data_version = i -> on garde les premiers round(frac_i * N) images (ordre de
+# tri déterministe) : sous-ensembles imbriqués simulant l'accumulation de
+# données dans le temps (v0 ⊂ v1 ⊂ … ⊂ full). Pas de 10 % : v0 = 10 %, v1 = 20 %,
+# … v9 = 100 % (= 'full'), et cela quelle que soit la taille N de la catégorie.
+DATA_VERSION_FRACTIONS = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
 _IMAGE_EXT = {".png", ".jpg", ".jpeg"}
 _extractor_cache: dict = {}
 
@@ -178,6 +178,37 @@ def fingerprint(entries) -> str:
     for name, size in sorted(entries):
         h.update(f"{name}:{size}\n".encode())
     return h.hexdigest()
+
+
+def data_versions(fractions=None) -> list:
+    """Décrit la grille de versions de données (pour l'API, la CLI et l'interface).
+
+    Retourne [{index, fraction, percent, label}] ; `index` est la valeur à passer
+    à `data_version` (le dernier vaut 100 %, donc équivaut à 'full'). Les libellés
+    sont calculés ici pour que la CLI, l'API et l'UI affichent la même chose.
+    """
+    versions = []
+    for index, fraction in enumerate(fractions or DATA_VERSION_FRACTIONS):
+        percent = int(round(fraction * 100))
+        suffix = " (full)" if percent >= 100 else ""
+        versions.append({
+            "index": index,
+            "fraction": fraction,
+            "percent": percent,
+            "label": f"v{index} — {percent} %{suffix}",
+        })
+    return versions
+
+
+def artifact_name(category: str, meta: dict) -> str:
+    """Nom du fichier d'artefact local, avec le **pourcentage explicite**.
+
+    `<cat>.npz` pour 100 %, sinon `<cat>.p<percent>.npz` (ex. `bottle.p40.npz`).
+    Le nom dépend de la fraction réellement utilisée et non de l'index de la
+    grille : changer la grille ne « renumérote » donc pas les modèles existants.
+    """
+    percent = int(round(float(meta.get("fraction") or 1.0) * 100))
+    return f"{category}.npz" if percent >= 100 else f"{category}.p{percent}.npz"
 
 
 # ─────────────────────────────────────────────────────────────
@@ -326,9 +357,15 @@ def load_model(path) -> PadimModel:
         )
 
 
+def _percent_in_name(path) -> int:
+    """Extrait le pourcentage d'un nom d'artefact (`bottle.p40.npz` -> 40)."""
+    match = re.search(r"\.p(\d+)\.npz$", Path(path).name)
+    return int(match.group(1)) if match else 0
+
+
 def resolve_model_path(category: str, model_dir="models") -> Path:
-    """Résout l'artefact d'une catégorie : `<cat>.npz` (full) si présent,
-    sinon la version la plus récente `<cat>.v*.npz` / `<cat>.f*.npz`.
+    """Résout l'artefact local d'une catégorie : `<cat>.npz` (100 %) si présent,
+    sinon la version la plus complète disponible (`<cat>.p<percent>.npz`).
 
     Lève FileNotFoundError si aucun modèle n'existe pour cette catégorie.
     """
@@ -336,13 +373,15 @@ def resolve_model_path(category: str, model_dir="models") -> Path:
     full = model_dir / f"{category}.npz"
     if full.exists():
         return full
-    candidates = sorted(model_dir.glob(f"{category}.*.npz"))
+    candidates = list(model_dir.glob(f"{category}.*.npz"))
     if not candidates:
         raise FileNotFoundError(
             f"Aucun modèle entraîné pour '{category}' dans {model_dir}/ — lancer : "
             f"python scripts/training.py --category {category} --eval"
         )
-    return candidates[-1]
+    # Le pourcentage est explicite dans le nom : on prend le plus élevé (un tri
+    # alphabétique donnerait `p100` avant `p40`, donc le plus petit).
+    return max(candidates, key=_percent_in_name)
 
 
 # ─────────────────────────────────────────────────────────────

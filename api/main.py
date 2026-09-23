@@ -68,7 +68,7 @@ except ImportError:  # monitoring non installé : l'API reste pleinement fonctio
 
 class TrainingRequest(BaseModel):
     category: str
-    data_version: Optional[Union[int, str]] = None   # 0..4 ou 'full' (grille)
+    data_version: Optional[Union[int, str]] = None   # index 0..9 ou 'full' (voir /data-versions)
     fraction: Optional[float] = Field(default=None, gt=0.0, le=1.0)
     img_size: int = Field(default=padim.IMG_SIZE)
     eval: bool = False                               # AUC + seuil sur le split test
@@ -94,7 +94,8 @@ def _model_path_for(category: str) -> tuple[Path, str]:
 @app.get("/")
 def root() -> dict:
     return {"app": "anomalies-indus", "version": app.version,
-            "endpoints": ["/training", "/predict", "/models", "/runs", "/metrics"]}
+            "endpoints": ["/training", "/predict", "/models", "/runs",
+                          "/data-versions", "/metrics"]}
 
 
 @app.get("/models")
@@ -116,6 +117,22 @@ def runs(limit: int = 20, category: Optional[str] = None) -> dict:
 
     tracking.setup_mlflow()
     return {"runs": tracking.recent_runs(limit=limit, category=category)}
+
+
+@app.get("/data-versions")
+def data_versions() -> dict:
+    """Grille des versions de données : `v0` = 10 %, `v1` = 20 %… `v9` = 100 %.
+
+    `data_version` accepte l'index renvoyé ici (0..9) ou la chaîne 'full' ; les
+    sous-ensembles sont imbriqués (v0 ⊂ v1 ⊂ …) : c'est une simulation de
+    l'accumulation de données dans le temps.
+    """
+    versions = padim.data_versions()
+    return {
+        "versions": versions,
+        "fractions": [v["fraction"] for v in versions],
+        "note": "data_version = index de la grille, ou 'full' pour 100 %",
+    }
 
 
 @app.post("/training")
@@ -144,14 +161,8 @@ def training(req: TrainingRequest) -> dict:
         meta.update(padim.evaluate_on_test(client, settings.minio_bucket, model,
                                            category, req.img_size))
 
-    # Nom d'artefact porteur de la version (le « full » garde le nom simple)
-    if meta.get("full", False):
-        out_name = f"{category}.npz"
-    elif meta.get("data_version") is not None:
-        out_name = f"{category}.v{meta['data_version']}.npz"
-    else:
-        out_name = f"{category}.f{int(round(meta['fraction'] * 100))}.npz"
-    artifact = padim.save_model(model, MODEL_DIR / out_name)
+    # Nom d'artefact explicite : `bottle.p40.npz` (40 %) ou `bottle.npz` (100 %)
+    artifact = padim.save_model(model, MODEL_DIR / padim.artifact_name(category, meta))
 
     meta.update({
         "artifact": artifact,

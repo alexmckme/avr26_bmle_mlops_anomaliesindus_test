@@ -6,17 +6,18 @@ ou depuis un dossier local (test sans MinIO). Le modèle est enregistré sous
 models/<catégorie>.npz (mean + cov_inv + métadonnées).
 
 Usage (depuis la racine du projet) :
-    python scripts/training.py --category bottle
-    python scripts/training.py --category bottle --eval           # + AUC rapide
-    python scripts/training.py --category bottle --data-version 1 # 40 % du corpus
+    python scripts/training.py --category bottle                 # 100 % (full)
+    python scripts/training.py --category bottle --eval          # + AUC rapide
+    python scripts/training.py --category bottle --data-version 2 # 30 % du corpus
     python scripts/training.py --category screw  --fraction 0.5   # 50 % direct
     python scripts/training.py --category bottle --source local
 
-Sous-ensembles (« croissance accumulée ») :
-    data_version = index (0..4) ou 'full' dans la grille DATA_VERSION_FRACTIONS
-    [0.2, 0.4, 0.6, 0.8, 1.0] ; chaque version garde les PREMIERS images du
-    corpus trié -> versions imbriquées simulant un dataset qui grandit.
-    fraction = alternative directe (0..1]. Défaut : dataset complet (full).
+Sous-ensembles (« croissance accumulée » par pas de 10 %) :
+    data_version = index (0..9) ou 'full' dans la grille DATA_VERSION_FRACTIONS
+    [0.1, 0.2, …, 0.9, 1.0] : v0 = 10 %, v1 = 20 %… v9 = 100 %. Chaque version
+garde les PREMIERS images du corpus trié -> versions imbriquées simulant un
+dataset qui grandit. `fraction` (0..1]) est une alternative directe.
+    Défaut : dataset complet (full).
 
 Remarque : 1 modèle par catégorie (les catégories MVTec sont hétérogènes).
 
@@ -54,8 +55,10 @@ def main() -> int:
     parser.add_argument("--out", default="models", help="Dossier des artefacts")
     parser.add_argument("--img-size", type=int, default=padim.IMG_SIZE)
     parser.add_argument("--data-version", default=None,
-                        help="Version de données (0..4 ou 'full') dans la grille "
-                             "de croissance ; défaut = full")
+                        # NB : « %% » car argparse formate les aides avec `%`.
+                        help=f"Version de données (0..{len(padim.DATA_VERSION_FRACTIONS) - 1} "
+                             "ou 'full') : grille par pas de 10 %% ; "
+                             "défaut = full (100 %%)")
     parser.add_argument("--fraction", type=float, default=None,
                         help="Fraction directe du corpus (0..1], ex: 0.5")
     parser.add_argument("--eval", action="store_true",
@@ -95,14 +98,8 @@ def main() -> int:
         manifest = versioning.dir_manifest(Path(args.local_dir), args.category, meta)
         eval_meta = {}
 
-    # Nom d'artefact porteur de la version (le « full » garde le nom simple)
-    if meta.get("full", False):
-        out_name = f"{args.category}.npz"
-    elif meta.get("data_version") is not None:
-        out_name = f"{args.category}.v{meta['data_version']}.npz"
-    else:
-        out_name = f"{args.category}.f{int(round(meta['fraction'] * 100))}.npz"
-    out_path = Path(args.out) / out_name
+    # Nom d'artefact explicite : `bottle.p40.npz` (40 %) ou `bottle.npz` (100 %)
+    out_path = Path(args.out) / padim.artifact_name(args.category, meta)
     artifact = padim.save_model(model, out_path)
 
     meta.update({

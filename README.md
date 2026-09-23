@@ -11,7 +11,7 @@ d'anomalies industrielles (dataset [MVTec AD](https://www.mvtec.com/company/rese
 - [x] Récupération du dataset MVTec AD depuis Kaggle (`scripts/download_data.py`)
 - [x] Base de données d'images (MinIO) + ingestion `scripts/ingest_data.py`
 - [x] Entraînement PaDiM `scripts/training.py` (1 modèle/catégorie, versions de données simulées)
-- [x] API FastAPI `api/main.py` — endpoints `/training` et `/predict`
+- [x] API FastAPI `api/main.py` — `/training`, `/predict`, `/models`, `/runs`, `/data-versions`, `/metrics`
 - [x] Script de prédiction `scripts/predict.py` (CLI, heatmap, JSON)
 - [x] Suivi d'expériences MLflow (params/métriques/artefacts dans MinIO)
 - [x] Model Registry — PaDiM exposé en pyfunc, alias `candidate`/`champion`, promotion automatique
@@ -337,19 +337,28 @@ le même hash SHA-256 (utile pour l'intégrer plus tard dans un pipeline planifi
 
 ```bash
 python scripts/training.py --category bottle --eval              # depuis MinIO (+ AUC)
-python scripts/training.py --category bottle --data-version 1    # 40 % du corpus
-python scripts/training.py --category screw  --fraction 0.5      # 50 % direct
+python scripts/training.py --category bottle --data-version 2    # 30 % du corpus
+python scripts/training.py --category screw  --fraction 0.5      # 50 % direct (hors grille)
 python scripts/training.py --category screw --source local       # dossier local
 ```
 
-**Versions de données simulées** (`data_version` = index 0..4 / `full`, grille
-`[0.2, 0.4, 0.6, 0.8, 1.0]`) : on garde les _premiers_ images du corpus trié →
-versions imbriquées simulant un dataset qui grandit dans le temps. Le hash
-`dataset_sha256` change à chaque version → artefact et métriques différents
-(ex. bottle : AUC 0.992 / 0.994 / 0.999). `full` = dataset complet et reproductible.
+**Versions de données simulées** : la grille `DATA_VERSION_FRACTIONS` avance par
+**pas de 10 %** → `data_version` = index `0..9` (ou `'full'`) : `v0` = 10 %, `v1` = 20 %,
+… `v9` = 100 %. On garde les _premiers_ images du corpus trié → versions imbriquées
+simulant un dataset qui grandit dans le temps. Le hash `dataset_sha256` change à
+chaque version → artefact et métriques différents (ex. bottle : AUC 0.992 à 20 %,
+0.997 à 30 %, 0.999 à 100 %).
 
-Artefacts : `models/<catégorie>.npz` (full), `.v<n>.npz` (version), `.f<nn>.npz`
-(fraction) — mean + cov_inv + métadonnées. `models/` n'est pas versionné.
+```bash
+# la grille exacte est exposée par l'API (et affichée par l'interface Streamlit)
+curl -s localhost:8000/data-versions
+```
+
+Artefacts : `models/<catégorie>.npz` pour 100 %, sinon
+`models/<catégorie>.p<percent>.npz` (ex. `bottle.p30.npz` = 30 %) — mean + cov_inv +
+métadonnées. Le pourcentage est **explicite dans le nom** et ne dépend pas de l'index
+de la grille (la changer ne « renumérote » donc pas les modèles existants).
+`models/` n'est pas versionné.
 
 ## Prédiction (CLI)
 
@@ -459,7 +468,7 @@ curl -X POST http://localhost:8000/training \
      -H "Content-Type: application/json" \
      -d '{"category": "bottle", "eval": true}'
 
-# Version simulée : -d '{"category": "bottle", "data_version": 1}'
+# Version de données : -d '{"category": "bottle", "data_version": 2}'  # 30 % (voir /data-versions)
 
 # Prédire une image (multipart)
 curl -X POST http://localhost:8000/predict \
@@ -493,13 +502,14 @@ docker compose up -d            # streamlit fait partie du cœur applicatif
 | **Modèle & traçabilité** | champion par catégorie (AUC, commit du code, empreinte du dataset) et derniers runs                                  |
 | **Monitoring**           | voyants des services, liens MLflow/Grafana/Airflow/MinIO, métriques clés de `/metrics`                               |
 
-Pour rendre ces pages possibles sans embarquer MLflow côté interface, deux endpoints
-de **lecture** ont été ajoutés à l'API :
+Pour rendre ces pages possibles sans embarquer MLflow côté interface, trois endpoints
+ont été ajoutés à l'API :
 
 | Endpoint                     | Contenu                                                                                                    |
 | ---------------------------- | ---------------------------------------------------------------------------------------------------------- |
 | `GET /models`                | catégories présentes dans MinIO + champion/candidate de chacune (AUC, seuil, commit, empreinte du dataset) |
 | `GET /runs`                  | derniers runs d'entraînement (métriques + traçabilité)                                                     |
+| `GET /data-versions`         | grille des versions de données (`v0` = 10 % … `v9` = 100 %) — alimente le formulaire d'entraînement        |
 | `POST /predict?heatmap=true` | ajoute `heatmap_png` (carte d'anomalie superposée, PNG base64)                                             |
 
 Le rendu de la carte (`core.padim.anomaly_overlay`) est **partagé** avec
@@ -587,11 +597,11 @@ le dernier run qui l'a utilisée. Il vit **dans git** (donc versionné) sans con
 une seule image :
 
 ```json
-"e9f44bc1558326561331c73c4c3c3f453bef890a0ffa2bbcc3e8b32624a6d09f": {
-  "category": "bottle", "n_images": 42, "total_available": 209,
+"cd7bfe456678898a23b29aea358c6f44452b5fc0a5f30e059f471db5f6a8877c": {
+  "category": "bottle", "n_images": 63, "total_available": 209,
   "source": "s3://mvtec-ad/raw/bottle/train/good/",
-  "selection": {"data_version": 0, "fraction": 0.201},
-  "runs": {"count": 1, "last_run_id": "784c417621984dbab41546b250a1cfe8"}
+  "selection": {"data_version": 2, "fraction": 0.3014},
+  "runs": {"count": 1, "last_run_id": "f1c8c836e0684a15a13470aaa82736ba"}
 }
 ```
 
@@ -607,19 +617,19 @@ python scripts/lineage.py --category bottle --alias candidate --images # toute l
 ```
 
 ```
-padim-bottle @candidate  ->  version 10
-  run MLflow     : 784c417621984dbab41546b250a1cfe8
-  commit du code : 48e801a35028
-  AUC            : 0.9921
-  data_version   : 0 (42 images d'entraînement)
-  dataset_sha256 : e9f44bc1558326561331c73c4c3c3f453bef890a0ffa2bbcc3e8b32624a6d09f
-  index du repo  : 42 images sur 209 disponibles, 1 run(s) enregistrés
+padim-bottle @candidate  ->  version 11
+  run MLflow     : f1c8c836e0684a15a13470aaa82736ba
+  commit du code : df0074a1fa9d
+  AUC            : 0.9968
+  data_version   : 2 (63 images d'entraînement)
+  dataset_sha256 : cd7bfe456678898a23b29aea358c6f44452b5fc0a5f30e059f471db5f6a8877c
+  index du repo  : 63 images sur 209 disponibles, 1 run(s) enregistrés
                    source : s3://mvtec-ad/raw/bottle/train/good/
-  manifeste      : 42 images (empreinte recalculée cohérente : True)
+  manifeste      : 63 images (empreinte recalculée cohérente : True)
       - raw/bottle/train/good/000.png  (532823 o, etag 55573ccce4c8)
       - raw/bottle/train/good/001.png  (531263 o, etag 34b8d2965839)
       - raw/bottle/train/good/002.png  (541084 o, etag 3bff91aa1212)
-      … et 39 autres images (--images pour tout afficher)
+      … et 60 autres images (--images pour tout afficher)
 ```
 
 Les runs **antérieurs** à cette fonctionnalité affichent `?` / « manifeste
@@ -678,7 +688,7 @@ flowchart LR
   paramètres dans la config du run :
 
   ```json
-  { "category": "bottle", "data_version": 4, "eval": true, "register": true }
+  { "category": "bottle", "data_version": 9, "eval": true, "register": true }
   ```
 
   La réponse de `/training` (AUC, version registrée, décision de promotion) s'affiche
@@ -691,7 +701,7 @@ flowchart LR
 #    (garde-fou : la promotion n'a lieu que si l'AUC est >= celle du champion)
 # 2. Le dataset complet -> promotion en 'champion'
 docker compose exec airflow airflow dags trigger training_pipeline \
-     -c '{"category": "bottle", "data_version": 4, "eval": true, "register": true}'
+     -c '{"category": "bottle", "data_version": 9, "eval": true, "register": true}'
 ```
 
 ### Choix de simplicité assumés

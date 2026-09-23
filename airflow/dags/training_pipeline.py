@@ -13,7 +13,7 @@ train/serve skew, et image Airflow légère : pas de TensorFlow).
   automatique du champion), déclencher manuellement le DAG depuis l'UI
   (« Trigger DAG w/ config ») avec par exemple :
 
-      {"category": "bottle", "data_version": 4, "eval": true, "register": true}
+      {"category": "bottle", "data_version": 9, "eval": true, "register": true}
 
 Toutes les valeurs ci-dessous sont surchargeables via `dag_run.conf`.
 """
@@ -32,7 +32,7 @@ TRAINING_SCHEDULE = os.getenv("TRAINING_SCHEDULE", "* * * * *")
 
 # ── Valeurs par défaut d'un run (surchargeables via dag_run.conf) ──────────────
 CATEGORY = "bottle"
-DATA_VERSION = "0"   # "0".."4" (jeux d'entraînement cumulatifs) ou "full"
+DATA_VERSION = "0"   # "0".."9" (v0 = 10 % … v9 = 100 %, jeux cumulatifs) ou "full"
 EVAL = "True"        # calcule l'AUC sur le split test
 REGISTER = "False"   # True => version dans le Registry (+ promotion du champion)
 

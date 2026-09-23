@@ -52,6 +52,15 @@ def fetch_models() -> dict:
     return api.models()
 
 
+@st.cache_data(ttl=300, show_spinner=False)
+def fetch_data_versions() -> list[dict]:
+    """Grille des versions de données (`GET /data-versions`), ex. v0 = 10 %."""
+    try:
+        return api.data_versions().get("versions", [])
+    except api.ApiError:
+        return []
+
+
 def show_table(data: pd.DataFrame, height: int | None = None) -> None:
     """Affiche un DataFrame (compatible plusieurs versions de Streamlit).
 
@@ -276,12 +285,19 @@ def page_training() -> None:
                "le champion** s'il fait au moins aussi bien que celui en place.")
 
     categories = bucket_categories() or ["bottle"]
+    versions = fetch_data_versions()
+    indexes = [v["index"] for v in versions] or [0]
+    labels = {v["index"]: v["label"] for v in versions}
+
     with st.form("training"):
         col1, col2 = st.columns(2)
         category = col1.selectbox("Catégorie (présente dans MinIO)", categories)
-        version = col2.selectbox("Version de données (croissance simulée)",
-                                 ["full", 0, 1, 2, 3, 4], index=0,
-                                 format_func=lambda v: "100 % (full)" if v == "full" else f"v{v}")
+        version = col2.selectbox(
+            "Part des données d'entraînement", indexes, index=len(indexes) - 1,
+            format_func=lambda i: labels.get(i, f"v{i}"),
+            help="Sous-ensembles imbriqués simulant l'accumulation de données : "
+                 "v0 entraîne sur 10 % du corpus, v9 sur la totalité.",
+        )
         col3, col4, col5 = st.columns(3)
         do_eval = col3.checkbox("Évaluer (AUC + seuil)", value=True)
         register = col4.checkbox("Enregistrer au Registry", value=True)
@@ -292,9 +308,8 @@ def page_training() -> None:
     if not submitted:
         return
 
-    payload = {"category": category, "eval": do_eval, "register": register, "promote": promote}
-    if version != "full":
-        payload["data_version"] = version
+    payload = {"category": category, "data_version": version, "eval": do_eval,
+               "register": register, "promote": promote}
 
     with st.spinner("Entraînement en cours (de 30 s à 3 min selon l'état du cache)…"):
         try:

@@ -159,12 +159,19 @@ def list_minio_objects(client, bucket: str, prefix: str) -> list[dict]:
 
 
 def _select(objects: list[dict], meta: dict) -> list[dict]:
-    """Réapplique la **même** sélection déterministe que l'entraînement."""
+    """Réapplique la **même** sélection déterministe que l'entraînement.
+
+    On repart de la fraction *résolue* enregistrée dans le run (et non de l'index
+    de la grille) : la vérification de l'empreinte reste donc valable même si la
+    grille de versions évolue après coup (`DATA_VERSION_FRACTIONS`).
+    """
     pairs = [(o["id"], o["size"]) for o in objects]
-    if meta.get("data_version") is not None:
+    if meta.get("fraction") is not None:
+        subset, _ = padim.subset_entries(pairs, fraction=meta["fraction"])
+    elif meta.get("data_version") is not None:
         subset, _ = padim.subset_entries(pairs, data_version=meta["data_version"])
     else:
-        subset, _ = padim.subset_entries(pairs, fraction=meta.get("fraction"))
+        subset = pairs
     by_id = {o["id"]: o for o in objects}
     return [by_id[key] for key, _ in subset]
 

@@ -62,6 +62,11 @@ def runs(limit: int = 20, category: str | None = None) -> dict:
     return _request("GET", "/runs", params=params)
 
 
+def data_versions() -> dict:
+    """Grille des versions de données (`GET /data-versions`) : v0 = 10 %, v9 = 100 %."""
+    return _request("GET", "/data-versions")
+
+
 def metrics_text() -> str:
     """Métriques Prometheus brutes de l'API (`GET /metrics`)."""
     try:
