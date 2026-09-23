@@ -1,6 +1,78 @@
 {
   "_note": "Index des jeux de données utilisés par un entraînement enregistré. Clé = dataset_sha256 (empreinte des images : clés + tailles). La liste exacte des images de chaque run est dans l'artefact 'dataset_manifest.json' de ce run (MLflow/MinIO). Fichier généré : le committer fait partie du versioning des données.",
   "datasets": {
+    "07d9aa41fdab88b29a738d2b1df61a34de69c9d7ab97b3e1ed010b5fc22e5f50": {
+      "category": "cable",
+      "first_seen": "2026-09-23T09:10:30+00:00",
+      "full": false,
+      "last_seen": "2026-09-23T09:10:30+00:00",
+      "manifest": "dataset_manifest.json (artefact du run)",
+      "n_images": 157,
+      "runs": {
+        "count": 1,
+        "last_run_id": "0b1c905a56f047af85db4ef054a8f9ef"
+      },
+      "selection": {
+        "data_version": 6,
+        "fraction": 0.7009
+      },
+      "source": "s3://mvtec-ad/raw/cable/train/good/",
+      "total_available": 224
+    },
+    "81d5e420e8b54d372723f997816ddaa9caa0203349a69e3004f0a9ce350d7c66": {
+      "category": "bottle",
+      "first_seen": "2026-09-23T00:59:55+00:00",
+      "full": true,
+      "last_seen": "2026-09-23T00:59:55+00:00",
+      "manifest": "dataset_manifest.json (artefact du run)",
+      "n_images": 209,
+      "runs": {
+        "count": 1,
+        "last_run_id": "1e6fe8189b914ac38fe61c190299d836"
+      },
+      "selection": {
+        "data_version": 9,
+        "fraction": 1.0
+      },
+      "source": "s3://mvtec-ad/raw/bottle/train/good/",
+      "total_available": 209
+    },
+    "908d95449b5a50173090fd5d5bbd306bb9dda7a92396aa0744024b56c6fb20f0": {
+      "category": "cable",
+      "first_seen": "2026-09-23T09:13:24+00:00",
+      "full": false,
+      "last_seen": "2026-09-23T09:13:24+00:00",
+      "manifest": "dataset_manifest.json (artefact du run)",
+      "n_images": 67,
+      "runs": {
+        "count": 1,
+        "last_run_id": "5d30d48683eb4bec922124f0b9034317"
+      },
+      "selection": {
+        "data_version": 2,
+        "fraction": 0.2991
+      },
+      "source": "s3://mvtec-ad/raw/cable/train/good/",
+      "total_available": 224
+    },
+    "b8f4404b74ce0c7e2fe569dd372b686836d9fd05020f3571921b8278671541ac": {
+      "category": "bottle",
+      "first_seen": "2026-09-23T08:44:50+00:00",
+      "full": false,
+      "last_seen": "2026-09-23T08:44:50+00:00",
+      "manifest": "dataset_manifest.json (artefact du run)",
+      "n_images": 21,
+      "runs": {
+        "count": 1,
+        "last_run_id": "060cc55d79da4556a5555e4d79582af3"
+      },
+      "selection": {
+        "data_version": 0,
+        "fraction": 0.1005
+      },
+      "source": "s3://mvtec-ad/raw/bottle/train/good/",
+      "total_available": 209
+    },
     "cd7bfe456678898a23b29aea358c6f44452b5fc0a5f30e059f471db5f6a8877c": {
       "category": "bottle",
       "first_seen": "2026-09-23T00:52:12+00:00",
@@ -19,6 +91,24 @@
       "source": "s3://mvtec-ad/raw/bottle/train/good/",
       "total_available": 209
     },
+    "dc9ae5f7321e6248174ee0909f080d117f826d2b644cab6143203056334ef275": {
+      "category": "cable",
+      "first_seen": "2026-09-23T08:54:44+00:00",
+      "full": false,
+      "last_seen": "2026-09-23T09:09:22+00:00",
+      "manifest": "dataset_manifest.json (artefact du run)",
+      "n_images": 22,
+      "runs": {
+        "count": 3,
+        "last_run_id": "09e26e990ee1454d9f9f03d3bdce5873"
+      },
+      "selection": {
+        "data_version": 0,
+        "fraction": 0.0982
+      },
+      "source": "s3://mvtec-ad/raw/cable/train/good/",
+      "total_available": 224
+    },
     "e9f44bc1558326561331c73c4c3c3f453bef890a0ffa2bbcc3e8b32624a6d09f": {
       "category": "bottle",
       "first_seen": "2026-09-23T00:03:18+00:00",
@@ -36,8 +126,26 @@
       },
       "source": "s3://mvtec-ad/raw/bottle/train/good/",
       "total_available": 209
+    },
+    "f52d7c040eae61389386ddea2b8d0436f2bb171d5e37a2be7e6bf00287959f1c": {
+      "category": "cable",
+      "first_seen": "2026-09-23T09:03:40+00:00",
+      "full": false,
+      "last_seen": "2026-09-23T09:03:40+00:00",
+      "manifest": "dataset_manifest.json (artefact du run)",
+      "n_images": 45,
+      "runs": {
+        "count": 1,
+        "last_run_id": "9f30c723643841629acc98db9634bfc6"
+      },
+      "selection": {
+        "data_version": 1,
+        "fraction": 0.2009
+      },
+      "source": "s3://mvtec-ad/raw/cable/train/good/",
+      "total_available": 224
     }
   },
   "schema": 1,
-  "updated_at": "2026-09-23T00:52:12+00:00"
+  "updated_at": "2026-09-23T09:13:24+00:00"
 }

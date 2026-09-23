@@ -84,6 +84,7 @@ flowchart LR
 ├── requirements.txt
 ├── .env / .env.example
 ├── .gitignore
+├── DEMO.md             # runbook de démo (services + commandes dans l'ordre)
 └── README.md
 ```
 
@@ -174,6 +175,9 @@ Après démarrage :
 
 ## Démarrage avec Docker (stack complète)
 
+> **Pour une démonstration pas à pas** — ce que fait chaque service + l'ordre exact
+> des commandes : voir [`DEMO.md`](DEMO.md).
+
 Alternative au mode natif : `docker compose` lance le cœur applicatif
 (`airflow` et `monitoring` sont optionnels, derrière des profils : voir les sections
 Orchestration et Monitoring).
@@ -184,8 +188,17 @@ docker compose up -d --build
 docker compose --profile airflow up -d     # optionnel : + orchestration
 docker compose --profile monitoring up -d  # optionnel : + Prometheus/Grafana
 docker compose logs -f api
-docker compose down
+# ⚠️ arrêter AVEC les profils (sinon leurs conteneurs gardent une référence au
+#    réseau supprimé et refusent de redémarrer : « network … not found »)
+docker compose --profile airflow --profile monitoring down
 ```
+
+- **Profils Compose** : `airflow` et `monitoring` sont déclarés derrière des profils,
+  pour ne pas imposer ~2 Go d'images et ~1 min de démarrage à qui veut seulement
+  entraîner/prédire. `.env` active les deux (`COMPOSE_PROFILES=airflow,monitoring`),
+  donc `docker compose up -d` démarre **les 7 services** ; pour le cœur seul :
+  `COMPOSE_PROFILES= docker compose up -d` (ou ponctuellement
+  `docker compose --profile '*' up -d` pour tout activer sans toucher au `.env`).
 
 | Service      | URL (hôte)                                                  | Rôle                                                              |
 | ------------ | ----------------------------------------------------------- | ----------------------------------------------------------------- |
@@ -228,6 +241,10 @@ docker compose down
   `5050:5000`.
 - Build interrompu ⇒ TensorFlow retéléchargé → les Dockerfiles utilisent un
   **cache pip persistant** (`--mount=type=cache`) et des timeouts tolérants.
+- `failed to set up container networking: network … not found` après un
+  `docker compose down` sans profils : les conteneurs `airflow`/`prometheus`/`grafana`
+  survivent en référençant le réseau supprimé. Relancer avec les profils :
+  `docker compose --profile airflow --profile monitoring down` puis `… up -d`.
 
 ## Vérifier que tout tourne bien dans Docker (et pas en local)
 

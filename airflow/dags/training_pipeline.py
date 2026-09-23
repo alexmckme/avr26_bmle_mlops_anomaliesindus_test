@@ -31,10 +31,10 @@ API_BASE_URL = os.getenv("API_BASE_URL", "http://api:8000")
 TRAINING_SCHEDULE = os.getenv("TRAINING_SCHEDULE", "* * * * *")
 
 # ── Valeurs par défaut d'un run (surchargeables via dag_run.conf) ──────────────
-CATEGORY = "bottle"
-DATA_VERSION = "0"   # "0".."9" (v0 = 10 % … v9 = 100 %, jeux cumulatifs) ou "full"
+CATEGORY = "cable"
+DATA_VERSION = "6"   # "0".."9" (v0 = 10 % … v9 = 100 %, jeux cumulatifs) ou "full"
 EVAL = "True"        # calcule l'AUC sur le split test
-REGISTER = "False"   # True => version dans le Registry (+ promotion du champion)
+REGISTER = "True"   # True => version dans le Registry (+ promotion du champion)
 
 # 1) Vérifier que l'API répond (échec rapide et lisible si la stack est incomplète).
 CHECK_API_CMD = f"curl -fsS --max-time 15 {API_BASE_URL}/"
