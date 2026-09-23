@@ -29,6 +29,7 @@ from pydantic import BaseModel, Field
 
 import core.metrics as metrics
 import core.padim as padim
+import core.versioning as versioning
 from core.config import load_settings
 from core.storage import get_client
 
@@ -135,6 +136,10 @@ def training(req: TrainingRequest) -> dict:
         "elapsed_s": round(time.time() - t0, 1),
     })
 
+    # Traçabilité : commit du code + manifeste des images réellement utilisées
+    versioning.add_code_info(meta)
+    manifest = versioning.minio_manifest(client, settings.minio_bucket, category, meta)
+
     # Suivi MLflow (même helper que les scripts)
     from core import tracking
 
@@ -142,6 +147,7 @@ def training(req: TrainingRequest) -> dict:
         info = tracking.log_training(
             meta, artifact, run_name=category,
             register_model=f"padim-{category}" if req.register else None,
+            manifest=manifest,
         )
         if info:
             meta["mlflow_run_id"] = info["run_id"]

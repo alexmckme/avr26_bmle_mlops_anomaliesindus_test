@@ -107,9 +107,11 @@ move_path "models" "models"
 move_path "mlflow.db" "mlflow.db"
 move_path "mlflow.db-wal" "mlflow.db-wal"
 move_path "mlflow.db-shm" "mlflow.db-shm"
+move_path "datasets.json" "datasets.json"
 
 # Docker créerait un DOSSIER si le fichier du bind mount est absent
 [ -f mlflow.db ] || : > mlflow.db
+printf '{\n  "schema": 1,\n  "datasets": {}\n}\n' > datasets.json
 mkdir -p models
 
 echo "3) Redémarrage de la stack…"

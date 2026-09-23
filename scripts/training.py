@@ -24,6 +24,11 @@ Chaque entraînement est enregistré dans MLflow (params, métriques, artefact),
 artefacts sont stockés dans MinIO, et le modèle est promu automatiquement en
 « champion » s'il fait au moins aussi bien que le champion en place (comparaison
 sur l'AUC ; nécessite --eval). Désactivable avec --no-mlflow / --no-promote.
+
+Traçabilité (versioning code + données) : chaque run porte le **commit git** du
+code et un artefact `dataset_manifest.json` listant les images utilisées ; l'index
+`datasets.json` (fichier du repo, à committer) catalogue les jeux de données par
+leur empreinte `dataset_sha256`. Voir `core/versioning.py`.
 """
 
 from __future__ import annotations
@@ -37,6 +42,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import core.padim as padim
+import core.versioning as versioning
 
 
 def main() -> int:
@@ -75,6 +81,9 @@ def main() -> int:
             client, settings.minio_bucket, args.category, img_size=args.img_size,
             data_version=args.data_version, fraction=args.fraction,
         )
+        # Manifeste : les images exactes utilisées (traçabilité data)
+        manifest = versioning.minio_manifest(client, settings.minio_bucket,
+                                             args.category, meta)
         eval_meta = padim.evaluate_on_test(client, settings.minio_bucket, model,
                                            args.category, args.img_size) if args.eval else {}
     else:
@@ -83,6 +92,7 @@ def main() -> int:
             source_dir, img_size=args.img_size,
             data_version=args.data_version, fraction=args.fraction,
         )
+        manifest = versioning.dir_manifest(Path(args.local_dir), args.category, meta)
         eval_meta = {}
 
     # Nom d'artefact porteur de la version (le « full » garde le nom simple)
@@ -101,6 +111,9 @@ def main() -> int:
     })
     meta.update(eval_meta)
 
+    # Commit du code (apparaît dans les params MLflow et dans la sortie du script)
+    versioning.add_code_info(meta)
+
     # Suivi MLflow (dégradation gracieuse si absent/indisponible)
     if not args.no_mlflow:
         import core.tracking as tracking
@@ -108,7 +121,8 @@ def main() -> int:
         if tracking.setup_mlflow():
             register_model = None if args.no_register else f"padim-{args.category}"
             info = tracking.log_training(meta, artifact, run_name=args.run_name,
-                                         register_model=register_model)
+                                         register_model=register_model,
+                                         manifest=manifest)
             if info:
                 meta["mlflow_run_id"] = info["run_id"]
                 if info.get("model_version") is not None:

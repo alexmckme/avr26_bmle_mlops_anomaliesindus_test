@@ -24,5 +24,8 @@ models/
 mlflow.db
 mlruns/
 
+# Versioning data : écriture temporaire de l'index (datasets.json, lui, est committé)
+datasets.json.tmp
+
 # OS
 .DS_Store

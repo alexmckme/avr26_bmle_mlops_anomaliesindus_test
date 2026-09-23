@@ -86,6 +86,13 @@ services:
     volumes:
       - ./models:/app/models # cache local du modèle champion
       - ./dataset/raw:/app/dataset/raw:ro # utile pour --source local / ingestion
+      # Versioning : le conteneur lit le .git de l'hôte (lecture seule) pour
+      # estampiller le commit du code dans chaque run MLflow (core/versioning.py).
+      # Pas de binaire git dans l'image : le module lit .git/HEAD directement.
+      - ./.git:/app/.git:ro
+      # Index des jeux de données : DOIT être un FICHIER (touch par setup_env.sh),
+      # sinon Docker crée un dossier au niveau du bind mount.
+      - ./datasets.json:/app/datasets.json
     depends_on:
       minio:
         condition: service_healthy

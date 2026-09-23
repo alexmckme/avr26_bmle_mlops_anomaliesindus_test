@@ -19,6 +19,7 @@ d'anomalies industrielles (dataset [MVTec AD](https://www.mvtec.com/company/rese
 - [x] Stack Docker Compose : `minio` + `mlflow` + `api`
 - [x] Orchestration Airflow (profil `airflow`) : DAG planifié qui déclenche `/training`
 - [x] Monitoring Prometheus + Grafana (profil `monitoring`) : `/metrics`, dashboards, alertes
+- [x] Versioning code + données : commit git par run, manifeste des images, index `datasets.json`
 - [ ] À venir : détection de dérive des données (comparaison de distributions)
 
 ## Architecture des données
@@ -51,11 +52,13 @@ flowchart LR
 │   ├── padim.py        #   modèle PaDiM : fit/score, lecture MinIO
 │   ├── metrics.py      #   métriques Prometheus (service + modèle)
 │   ├── padim_flavor.py #   PaDiM exposé comme modèle MLflow (pyfunc)
-│   └── tracking.py     #   MLflow : runs, Registry, champion, promotion
+│   ├── tracking.py     #   MLflow : runs, Registry, champion, promotion
+│   └── versioning.py   #   traçabilité : commit git + manifeste du dataset
 ├── scripts/            # scripts « métier » exécutables
 │   ├── download_data.py #  récupération du dataset MVTec AD (Kaggle) -> dataset/raw
 │   ├── ingest_data.py  #   ingestion dataset -> MinIO (à exécuter 1 fois)
 │   ├── training.py     #   entraînement PaDiM (1 catégorie -> models/*.npz)
+│   ├── lineage.py      #   traçabilité d'un modèle (code + images)
 │   ├── predict.py      #   prédiction CLI (image locale ou clé MinIO)
 │   └── reset_demo.sh   #   remise à zéro pour une démo « live »
 ├── api/
@@ -82,6 +85,9 @@ Fichiers locaux **non versionnés** (voir `.gitignore`) :
 - `minio-data/` — stockage MinIO (images MVTec + artefacts MLflow)
 - `models/` — modèles PaDiM + cache du champion
 - `mlflow.db` — backend store SQLite des runs
+
+À l'inverse, `datasets.json` **est** committé : c'est l'index du versioning des
+données (voir la section Versioning).
 
 ## Démarrage rapide (nouveau clone)
 
@@ -174,14 +180,14 @@ docker compose logs -f api
 docker compose down
 ```
 
-| Service      | URL (hôte)                                                  | Rôle                              |
-| ------------ | ----------------------------------------------------------- | --------------------------------- |
+| Service      | URL (hôte)                                                  | Rôle                                          |
+| ------------ | ----------------------------------------------------------- | --------------------------------------------- |
 | `api`        | http://localhost:8000/docs                                  | FastAPI (`/training`, `/predict`, `/metrics`) |
-| `minio`      | http://localhost:9200 (console) · `localhost:9100` (API S3) | images + artefacts                |
-| `mlflow`     | http://localhost:5050                                       | tracking + Model Registry         |
-| `airflow`    | http://localhost:8080 (profil `airflow`, admin/admin)       | orchestration du ré-entraînement  |
-| `prometheus` | http://localhost:9090 (profil `monitoring`)                 | collecte des métriques            |
-| `grafana`    | http://localhost:3000 (profil `monitoring`, admin/admin)    | tableaux de bord et alertes       |
+| `minio`      | http://localhost:9200 (console) · `localhost:9100` (API S3) | images + artefacts                            |
+| `mlflow`     | http://localhost:5050                                       | tracking + Model Registry                     |
+| `airflow`    | http://localhost:8080 (profil `airflow`, admin/admin)       | orchestration du ré-entraînement              |
+| `prometheus` | http://localhost:9090 (profil `monitoring`)                 | collecte des métriques                        |
+| `grafana`    | http://localhost:3000 (profil `monitoring`, admin/admin)    | tableaux de bord et alertes                   |
 
 - Les conteneurs **réutilisent tes données** : `./minio-data` (images + artefacts),
   `./mlflow.db` (historique des runs) et `./models` (cache du champion).
@@ -458,6 +464,117 @@ Exemple validé (`bottle`) : `/training` renvoie `auc = 0.9992` et un seuil de
 `38 048 944` ; `/predict` renvoie `anomaly: false` sur une image saine et
 `anomaly: true` sur une image `broken_large`.
 
+## Versioning (code + données)
+
+Deux questions à pouvoir trancher à tout moment, sur le modèle servi :
+
+1. **quel code** l'a produit ?
+2. **quelles images** ont servi à son entraînement ?
+
+Pas de DVC ici : les images restent la source de vérité dans MinIO, et on versionne
+la **recette** (sélection) et le **contenu exact** (liste des images) de chaque run.
+
+```mermaid
+flowchart LR
+    C[commit git] --> R[run MLflow]
+    D[(images MinIO)] --> M[dataset_manifest.json<br/>artefact du run]
+    M --> R
+    R --> V[version du Registry<br/>tags : git_commit + dataset_sha256]
+    M --> I[datasets.json<br/>index committé]
+    I -.->|empreinte -> dernier run| R
+```
+
+### 1. Le commit du code (`core/versioning.py`)
+
+Chaque run porte le commit dans ses **params** (`git_commit`, `git_branch`,
+`git_dirty`), dans ses **tags**, et sur la **version du Registry**. Résolution en
+cascade :
+
+| Source | Contexte | Remarque |
+| ------ | -------- | -------- |
+| variable `GIT_COMMIT` | CI / build | prioritaire (stamp de build) |
+| `git rev-parse` | hôte | donne aussi `git_dirty` (modifs non commitées) |
+| lecture de `.git/HEAD` | conteneur | pas de binaire git dans l'image : `./.git` est monté en lecture seule |
+
+`git_dirty` reste inconnu dans le conteneur (aucun binaire git) : c'est la seule
+limite, et elle est assumée. Le reste — commit, branche — est exact.
+
+### 2. Le manifeste des images
+
+`dataset_manifest.json` est un **artefact du run** (rangé par MLflow dans MinIO) :
+c'est la correspondance **run -> images**.
+
+```json
+{
+  "dataset_sha256": "e9f44bc1558326561331c73c4c3c3f453bef890a0ffa2bbcc3e8b32624a6d09f",
+  "fingerprint_matches": true,
+  "selection": {"data_version": 0, "fraction": 0.201, "n_images": 42, "total_available": 209},
+  "code": {"commit": "48e801a35028", "branch": "main", "source": "dot-git"},
+  "images": [
+    {"id": "raw/bottle/train/good/000.png", "size": 532823, "etag": "55573ccce4c8…"}
+  ]
+}
+```
+
+La sélection est **rejouée à l'identique** (les sous-ensembles `data_version` sont
+déterministes), puis l'empreinte est recalculée et comparée à celle de
+l'entraînement : `fingerprint_matches: false` signalerait que le dataset a bougé
+entre les deux. Aucune image n'est copiée ni dupliquée.
+
+### 3. L'index `datasets.json` (committé)
+
+C'est le « fichier de matching » : une empreinte de dataset -> ce qu'elle contient et
+le dernier run qui l'a utilisée. Il vit **dans git** (donc versionné) sans contenir
+une seule image :
+
+```json
+"e9f44bc1558326561331c73c4c3c3f453bef890a0ffa2bbcc3e8b32624a6d09f": {
+  "category": "bottle", "n_images": 42, "total_available": 209,
+  "source": "s3://mvtec-ad/raw/bottle/train/good/",
+  "selection": {"data_version": 0, "fraction": 0.201},
+  "runs": {"count": 1, "last_run_id": "784c417621984dbab41546b250a1cfe8"}
+}
+```
+
+Il n'est mis à jour que pour les runs qui **enregistrent une version de modèle** :
+sinon les runs planifiés d'Airflow (un par minute) réécriraient le fichier en boucle
+sans rien apporter.
+
+### 4. Remonter la chaîne
+
+```bash
+python scripts/lineage.py --category bottle                            # alias champion
+python scripts/lineage.py --category bottle --alias candidate --images # toute la liste
+```
+
+```
+padim-bottle @candidate  ->  version 10
+  run MLflow     : 784c417621984dbab41546b250a1cfe8
+  commit du code : 48e801a35028
+  AUC            : 0.9921
+  data_version   : 0 (42 images d'entraînement)
+  dataset_sha256 : e9f44bc1558326561331c73c4c3c3f453bef890a0ffa2bbcc3e8b32624a6d09f
+  index du repo  : 42 images sur 209 disponibles, 1 run(s) enregistrés
+                   source : s3://mvtec-ad/raw/bottle/train/good/
+  manifeste      : 42 images (empreinte recalculée cohérente : True)
+      - raw/bottle/train/good/000.png  (532823 o, etag 55573ccce4c8)
+      - raw/bottle/train/good/001.png  (531263 o, etag 34b8d2965839)
+      - raw/bottle/train/good/002.png  (541084 o, etag 3bff91aa1212)
+      … et 39 autres images (--images pour tout afficher)
+```
+
+Les runs **antérieurs** à cette fonctionnalité affichent `?` / « manifeste
+indisponible » (le script ne plante pas) : la traçabilité est rétro-compatible,
+mais évidemment incomplète pour l'historique.
+
+### Piège rencontré (et résolu)
+
+- Dans le conteneur, `datasets.json` est un **bind mount** : `os.replace()` vers un
+  point de montage échoue (`EBUSY — Device or resource busy`). L'écriture est donc
+  atomique *quand c'est possible*, sinon en place — acceptable car l'index est un
+  fichier **dérivé** : les runs MLflow et leurs manifestes restent la source de
+  vérité.
+
 ## Orchestration (Airflow)
 
 Objectif volontairement simple : **montrer qu'un entraînement peut être déclenché
@@ -552,15 +669,15 @@ docker compose exec airflow airflow dags pause training_pipeline
 
 ## Monitoring (Prometheus + Grafana)
 
-**À quoi ça sert ?** MLflow répond à *« quel modèle est le meilleur ? »* (historique,
-comparaison d'expériences). Le monitoring répond à *« comment se comporte le système
-maintenant ? »* — la question de la mise en production : est-ce que ça répond, est-ce
+**À quoi ça sert ?** MLflow répond à _« quel modèle est le meilleur ? »_ (historique,
+comparaison d'expériences). Le monitoring répond à _« comment se comporte le système
+maintenant ? »_ — la question de la mise en production : est-ce que ça répond, est-ce
 que ça répond vite, et **est-ce que ce que le modèle prédit a encore du sens ?**
 
-| Outil          | Rôle | Analogie |
-| -------------- | ---- | -------- |
-| **Prometheus** | Collecte et stocke des séries temporelles. Il *vient chercher* (modèle « pull ») l'endpoint `/metrics` toutes les 15 s. | la base de données des chiffres dans le temps |
-| **Grafana**    | Interroge Prometheus et dessine courbes, jauges et alertes. | l'écran du tableau de bord |
+| Outil          | Rôle                                                                                                                    | Analogie                                      |
+| -------------- | ----------------------------------------------------------------------------------------------------------------------- | --------------------------------------------- |
+| **Prometheus** | Collecte et stocke des séries temporelles. Il _vient chercher_ (modèle « pull ») l'endpoint `/metrics` toutes les 15 s. | la base de données des chiffres dans le temps |
+| **Grafana**    | Interroge Prometheus et dessine courbes, jauges et alertes.                                                             | l'écran du tableau de bord                    |
 
 ```mermaid
 flowchart LR
@@ -579,16 +696,16 @@ docker compose --profile monitoring up -d
 
 L'API expose `GET /metrics`. Deux familles de métriques :
 
-| Métrique | Type | Ce qu'elle raconte |
-| -------- | ---- | ------------------ |
-| `http_requests_total`, `http_request_duration_seconds` | compteur, histogramme | débit, latence et codes de statut (instrumentation FastAPI automatique) |
-| `anomalies_predictions_total{category,verdict}` | compteur | combien de pièces jugées saines / défectueuses |
-| `anomalies_prediction_score_ratio{category}` | jauge | dernier score **rapporté au seuil** (1.0 = pile le seuil) |
-| `anomalies_prediction_score{category}` | histogramme | distribution des distances de Mahalanobis² |
-| `anomalies_trainings_total{category,status}` | compteur | entraînements déclenchés (succès et échecs) |
-| `anomalies_training_duration_seconds{category}` | histogramme | durée des entraînements |
-| `anomalies_champion_auc{category}` | jauge | AUC du modèle effectivement servi (lu dans le Registry au démarrage) |
-| `anomalies_champion_promotions_total{category,promoted}` | compteur | décisions de promotion (promu / refusé) |
+| Métrique                                                 | Type                  | Ce qu'elle raconte                                                      |
+| -------------------------------------------------------- | --------------------- | ----------------------------------------------------------------------- |
+| `http_requests_total`, `http_request_duration_seconds`   | compteur, histogramme | débit, latence et codes de statut (instrumentation FastAPI automatique) |
+| `anomalies_predictions_total{category,verdict}`          | compteur              | combien de pièces jugées saines / défectueuses                          |
+| `anomalies_prediction_score_ratio{category}`             | jauge                 | dernier score **rapporté au seuil** (1.0 = pile le seuil)               |
+| `anomalies_prediction_score{category}`                   | histogramme           | distribution des distances de Mahalanobis²                              |
+| `anomalies_trainings_total{category,status}`             | compteur              | entraînements déclenchés (succès et échecs)                             |
+| `anomalies_training_duration_seconds{category}`          | histogramme           | durée des entraînements                                                 |
+| `anomalies_champion_auc{category}`                       | jauge                 | AUC du modèle effectivement servi (lu dans le Registry au démarrage)    |
+| `anomalies_champion_promotions_total{category,promoted}` | compteur              | décisions de promotion (promu / refusé)                                 |
 
 Les métriques `anomalies_*` sont définies dans `core/metrics.py` (avec la logique
 métier) ; les `http_*` viennent de `prometheus-fastapi-instrumentator`. Si la librairie
@@ -618,13 +735,13 @@ remplissent en direct.
 `monitoring/prometheus/alerts.yml` définit 5 règles, visibles dans l'onglet **Alerts**
 de Prometheus et dans Grafana :
 
-| Alerte | Condition | Ce qu'elle signifie |
-| ------ | --------- | ------------------- |
-| `ApiIndisponible` | `up == 0` pendant 1 min | l'API ne répond plus |
-| `LatencePredictElevee` | p95 de `/predict` > 1 s pendant 5 min | l'inférence est trop lente |
-| `ErreursServeur` | plus de 0,1 erreur 5xx/s pendant 5 min | des requêtes échouent |
+| Alerte                      | Condition                              | Ce qu'elle signifie                      |
+| --------------------------- | -------------------------------------- | ---------------------------------------- |
+| `ApiIndisponible`           | `up == 0` pendant 1 min                | l'API ne répond plus                     |
+| `LatencePredictElevee`      | p95 de `/predict` > 1 s pendant 5 min  | l'inférence est trop lente               |
+| `ErreursServeur`            | plus de 0,1 erreur 5xx/s pendant 5 min | des requêtes échouent                    |
 | `PartAnomaliesInhabituelle` | plus de 50 % d'anomalies pendant 5 min | dérive des données **ou** seuil inadapté |
-| `QualiteChampionFaible` | `anomalies_champion_auc < 0.90` | le modèle servi est de mauvaise qualité |
+| `QualiteChampionFaible`     | `anomalies_champion_auc < 0.90`        | le modèle servi est de mauvaise qualité  |
 
 Il n'y a **pas d'Alertmanager** : choix assumé pour garder la stack légère. Les alertes
 sont donc visibles mais n'envoient ni e-mail ni webhook. L'étape suivante naturelle est

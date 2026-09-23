@@ -1,0 +1,25 @@
+{
+  "_note": "Index des jeux de données utilisés par un entraînement enregistré. Clé = dataset_sha256 (empreinte des images : clés + tailles). La liste exacte des images de chaque run est dans l'artefact 'dataset_manifest.json' de ce run (MLflow/MinIO). Fichier généré : le committer fait partie du versioning des données.",
+  "datasets": {
+    "e9f44bc1558326561331c73c4c3c3f453bef890a0ffa2bbcc3e8b32624a6d09f": {
+      "category": "bottle",
+      "first_seen": "2026-09-23T00:03:18+00:00",
+      "full": false,
+      "last_seen": "2026-09-23T00:03:18+00:00",
+      "manifest": "dataset_manifest.json (artefact du run)",
+      "n_images": 42,
+      "runs": {
+        "count": 1,
+        "last_run_id": "784c417621984dbab41546b250a1cfe8"
+      },
+      "selection": {
+        "data_version": 0,
+        "fraction": 0.201
+      },
+      "source": "s3://mvtec-ad/raw/bottle/train/good/",
+      "total_available": 209
+    }
+  },
+  "schema": 1,
+  "updated_at": "2026-09-23T00:03:18+00:00"
+}

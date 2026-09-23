@@ -34,6 +34,14 @@ else
   echo "  + mlflow.db créé (fichier vide)"
 fi
 
+# 4. Index des jeux de données (bind mount -> aussi un FICHIER)
+if [ -f datasets.json ]; then
+  echo "  = datasets.json existe déjà"
+else
+  printf '{\n  "schema": 1,\n  "datasets": {}\n}\n' > datasets.json
+  echo "  + datasets.json créé (index de versioning des données)"
+fi
+
 cat <<'EOF'
 
 Étapes suivantes :

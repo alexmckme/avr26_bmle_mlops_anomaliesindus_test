@@ -18,6 +18,7 @@ import os
 import shutil
 from pathlib import Path
 
+from core import versioning
 from core.config import PROJECT_ROOT, load_settings
 
 _ENABLED = False
@@ -25,7 +26,9 @@ _ENABLED = False
 # Paramètres / métriques récupérés depuis le `meta` renvoyé par core.padim.
 _PARAM_KEYS = ("category", "source", "data_version", "fraction", "full",
                "img_size", "ridge", "n_features", "n_train", "grid",
-               "feature_layers")
+               "feature_layers",
+               # provenance du code (voir core.versioning.git_info)
+               "git_commit", "git_branch", "git_dirty")
 _METRIC_KEYS = ("auc", "n_test", "threshold", "elapsed_s")
 
 
@@ -92,12 +95,18 @@ def is_enabled() -> bool:
 
 
 def log_training(meta: dict, artifact_path: str, run_name: str | None = None,
-                 register_model: str | None = None, alias: str = "candidate") -> dict | None:
+                 register_model: str | None = None, alias: str = "candidate",
+                 manifest: dict | None = None) -> dict | None:
     """Enregistre un entraînement dans MLflow.
 
-    - Toujours : params, métriques, tags (`dataset_sha256`) et `metadata.json`.
+    - Toujours : params (dont le **commit du code**), métriques, tags
+      (`dataset_sha256`) et `metadata.json`.
+    - `manifest` fourni (voir `core.versioning`) : logge `dataset_manifest.json`,
+      c'est-à-dire la liste des images utilisées **pour ce run précis**.
     - `register_model` fourni : logge le modèle en **pyfunc** (PaDiM) et
-      l'enregistre dans le **Model Registry** sous ce nom, avec `alias`.
+      l'enregistre dans le **Model Registry** sous ce nom, avec `alias` ; la
+      provenance (commit + empreinte du dataset) est aussi posée en tags de la
+      version, et le dataset est référencé dans `datasets.json`.
     - Sinon : logge simplement l'artefact `.npz` (mode tracking seul).
 
     Retourne un dict {run_id, registered_model, model_version} ou None si le
@@ -107,11 +116,14 @@ def log_training(meta: dict, artifact_path: str, run_name: str | None = None,
         return None
     import mlflow
 
+    code = versioning.add_code_info(meta)
     params = {k: _param(meta[k]) for k in _PARAM_KEYS if k in meta}
     metrics = {k: float(meta[k]) for k in _METRIC_KEYS if meta.get(k) is not None}
     tags = {
         "dataset_sha256": str(meta.get("dataset_sha256", "")),
         "full_dataset": str(meta.get("full", "")),
+        "git_commit": str(meta.get("git_commit", "")),
+        "code_source": str(code.get("source", "")),
     }
 
     with mlflow.start_run(run_name=run_name) as run:
@@ -121,20 +133,52 @@ def log_training(meta: dict, artifact_path: str, run_name: str | None = None,
             mlflow.log_metrics(metrics)
         mlflow.set_tags(tags)
         mlflow.log_dict(meta, "metadata.json")
+        if manifest:
+            # Traçabilité « données » : les images exactes du run
+            mlflow.log_dict(manifest, versioning.MANIFEST_ARTIFACT)
 
         model_version = None
         if register_model:
             model_version = _log_and_register_padim(
                 artifact_path, register_model, alias
             )
+            _tag_model_version(register_model, model_version, meta)
         else:
             mlflow.log_artifact(str(artifact_path), artifact_path="model")
+
+        if manifest and register_model:
+            # Index `datasets.json` : seulement pour les runs qui enregistrent une
+            # version de modèle. Sinon les runs planifiés (un par minute) le
+            # réécriraient en boucle sans rien apporter.
+            versioning.update_dataset_index(manifest, run_id=run.info.run_id)
 
         return {
             "run_id": run.info.run_id,
             "registered_model": register_model,
             "model_version": model_version,
         }
+
+
+def _tag_model_version(registered_model: str, version, meta: dict) -> None:
+    """Pose la provenance (code + dataset) sur une version du Registry.
+
+    C'est ce qui permet de remonter du **champion servi** jusqu'au code et aux
+    images qui l'ont produit, directement depuis l'UI MLflow.
+    """
+    if version is None:
+        return
+    import mlflow
+
+    client = mlflow.MlflowClient()
+    for key in ("git_commit", "dataset_sha256", "data_version", "n_train"):
+        value = meta.get(key)
+        if value is None:
+            continue
+        try:
+            client.set_model_version_tag(registered_model, str(version), key,
+                                         _param(value))
+        except Exception as exc:  # noqa: BLE001 — tag informatif, jamais bloquant
+            print(f"[WARN] tag '{key}' non posé sur {registered_model} v{version} : {exc}")
 
 
 def _log_and_register_padim(artifact_path, register_model: str, alias: str):
