@@ -1,4 +1,4 @@
-# Règles d'alerte Prometheus — Anomalies Indus.
+# Règles d'alerte Prometheus — Anomalies Industrielles.
 #
 # Prometheus évalue ces expressions en continu et marque une alerte « firing »
 # quand la condition tient pendant la durée `for`. Sans Alertmanager (non installé :
@@ -7,7 +7,7 @@
 # le DAG de ré-entraînement) serait l'étape suivante naturelle.
 
 groups:
-  - name: anomalies-indus-service
+  - name: anomalies-industrielles-service
     rules:
       # ── Le service répond-il ? ──────────────────────────────────────────────
       - alert: ApiIndisponible
@@ -47,7 +47,7 @@ groups:
           summary: "Taux d'erreurs 5xx supérieur à 0,1/s"
           description: "Des requêtes échouent : regarder les logs de l'API."
 
-  - name: anomalies-indus-modele
+  - name: anomalies-industrielles-modele
     rules:
       # ── Surveillance « métier » du modèle ─────────────────────────────────
       - alert: PartAnomaliesInhabituelle

@@ -1,4 +1,4 @@
-"""Client HTTP de l'API Anomalies Indus.
+"""Client HTTP de l'API Anomalies Industrielles.
 
 L'interface Streamlit n'importe **que** ce module : aucune logique ML, aucun
 TensorFlow. Conséquences voulues :

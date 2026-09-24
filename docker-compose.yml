@@ -1,4 +1,4 @@
-# Orchestration locale de la stack MLOps « Anomalies Indus ».
+# Orchestration locale de la stack MLOps « Anomalies Industrielles ».
 #
 #   minio   : object store S3 (images MVTec + artefacts MLflow)
 #   mlflow  : serveur de tracking + Model Registry (backend SQLite, artefacts MinIO)
@@ -75,7 +75,7 @@ services:
       DATASET_DIR: dataset/raw
       # MLflow (serveur) + accès direct à MinIO pour les artefacts
       MLFLOW_TRACKING_URI: http://mlflow:5000
-      MLFLOW_EXPERIMENT: ${MLFLOW_EXPERIMENT:-anomalies-indus}
+      MLFLOW_EXPERIMENT: ${MLFLOW_EXPERIMENT:-anomalies-industrielles}
       MLFLOW_ARTIFACT_BUCKET: ${MLFLOW_ARTIFACT_BUCKET:-mlflow}
       MLFLOW_S3_ENDPOINT_URL: http://minio:9000
       AWS_ACCESS_KEY_ID: ${MINIO_ACCESS_KEY:-minioadmin}

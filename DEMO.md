@@ -1,4 +1,4 @@
-# Démo de soutenance — Anomalies Indus
+# Démo de soutenance — Anomalies Industrielles
 
 > **À quoi sert ce fichier ?** Décrire précisément **ce que fait chaque service**,
 > puis donner les **commandes à lancer dans l'ordre** pour une démonstration qui
@@ -425,7 +425,7 @@ minutes, puis la boucle recommence. »
 
 #### 3.7 Monitoring (Grafana, http://localhost:3000)
 
-Ouvrir le dossier **Anomalies Indus** → dashboard _Anomalies Indus — service & modèle_.
+Ouvrir le dossier **Anomalies Industrielles** → dashboard _Anomalies Industrielles — service & modèle_.
 → « à gauche la santé du service, à droite celle du modèle : verdicts, score/seuil,
 AUC du champion, entraînements, promotions. Et 5 alertes sont armées dans
 Prometheus. »

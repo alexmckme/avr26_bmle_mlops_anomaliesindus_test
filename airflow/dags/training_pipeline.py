@@ -1,4 +1,4 @@
-"""DAG de démonstration Airflow — Anomalies Indus.
+"""DAG de démonstration Airflow — Anomalies Industrielles.
 
 But, volontairement minimal : prouver l'**automatisation de l'exécution** du
 pipeline d'entraînement. Airflow ne contient AUCUNE logique de ML — le DAG appelle
@@ -73,7 +73,7 @@ with DAG(
     max_active_runs=1,                   # jamais 2 entraînements en parallèle
     dagrun_timeout=timedelta(minutes=10),
     default_args={"retries": 1, "retry_delay": timedelta(seconds=30)},
-    tags=["anomalies-indus", "training", "demo"],
+    tags=["anomalies-industrielles", "training", "demo"],
 ) as dag:
     check_api = BashOperator(
         task_id="check_api",

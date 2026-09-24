@@ -1,4 +1,4 @@
-"""Interface de démonstration — Anomalies Indus (Streamlit).
+"""Interface de démonstration — Anomalies Industrielles (Streamlit).
 
 Cette app est un **client HTTP de l'API** : aucune logique ML ici (voir
 `api_client.py`). Elle ne sert qu'à rendre la démonstration confortable :
@@ -40,7 +40,7 @@ LINKS = {
     "API (docs Swagger)": os.getenv("API_DOCS_URL", "http://localhost:8000/docs"),
 }
 
-st.set_page_config(page_title="Anomalies Indus", page_icon="🔍", layout="wide")
+st.set_page_config(page_title="Anomalies Industrielles", page_icon="🔍", layout="wide")
 
 
 # ─────────────────────────────────────────────────────────────
@@ -459,7 +459,7 @@ def page_monitoring() -> None:
 
 # ─────────────────────────────────────────────────────────────
 def main() -> None:
-    st.sidebar.title("🔍 Anomalies Indus")
+    st.sidebar.title("🔍 Anomalies Industrielles")
     st.sidebar.caption("Détection d'anomalies PaDiM — démonstration")
 
     page = st.sidebar.radio(

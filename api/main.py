@@ -1,4 +1,4 @@
-"""API FastAPI — Anomalies Indus.
+"""API FastAPI — Anomalies Industrielles.
 
 Endpoints :
     GET  /            -> infos de l'API
@@ -54,7 +54,7 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="Anomalies Indus API", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="Anomalies Industrielles API", version="0.1.0", lifespan=lifespan)
 
 # `/metrics` : séries temporelles que Prometheus vient chercher (modèle « pull »).
 # L'instrumentation couvre le HTTP (http_requests_total, http_request_duration_…).
@@ -93,7 +93,7 @@ def _model_path_for(category: str) -> tuple[Path, str]:
 
 @app.get("/")
 def root() -> dict:
-    return {"app": "anomalies-indus", "version": app.version,
+    return {"app": "anomalies-industrielles", "version": app.version,
             "endpoints": ["/training", "/predict", "/models", "/runs",
                           "/data-versions", "/metrics"]}
 

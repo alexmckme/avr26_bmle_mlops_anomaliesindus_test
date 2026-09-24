@@ -5,9 +5,9 @@
 apiVersion: 1
 
 providers:
-  - name: anomalies-indus
+  - name: anomalies-industrielles
     orgId: 1
-    folder: "Anomalies Indus"
+    folder: "Anomalies Industrielles"
     type: file
     disableDeletion: false
     allowUiUpdates: true

@@ -1,6 +1,6 @@
 # avr26_bmle_mlops_anomaliesindus_test
 
-Projet MLOps « Anomalies Indus » — mise en production d'un modèle de détection
+Projet MLOps « Anomalies Industrielles » — mise en production d'un modèle de détection
 d'anomalies industrielles (dataset [MVTec AD](https://www.mvtec.com/company/research/datasets/mvtec-ad)).
 
 > La performance du modèle compte peu : l'objectif est de démontrer une
@@ -410,7 +410,7 @@ runs dans un backend **SQLite** local (`mlflow.db`). Le dossier `models/` reste 
 cache local (l'API en a besoin même si MLflow/MinIO est indisponible).
 
 Configuration (`.env`) : `MLFLOW_TRACKING_URI` (vide ⇒ `sqlite:///mlflow.db`),
-`MLFLOW_EXPERIMENT=anomalies-indus`, `MLFLOW_ARTIFACT_BUCKET=mlflow`.
+`MLFLOW_EXPERIMENT=anomalies-industrielles`, `MLFLOW_ARTIFACT_BUCKET=mlflow`.
 
 > En **Docker**, le serveur MLflow tourne dans son conteneur : pour que des scripts
 > lancés **côté hôte** écrivent dans ce même serveur, utiliser
@@ -859,7 +859,7 @@ comparer des ratios est le seul moyen d'avoir un indicateur lisible et comparabl
 ### Le tableau de bord
 
 Provisionné automatiquement (« dashboards as code ») depuis
-`monitoring/grafana/dashboards/anomalies-indus.json` : **aucun clic** après un
+`monitoring/grafana/dashboards/anomalies-industrielles.json` : **aucun clic** après un
 `docker compose up`, et le dashboard est versionné avec le reste du code.
 
 - **Service** : débit sur `/predict`, latence p95, erreurs 5xx.

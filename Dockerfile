@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-# Image de l'API Anomalies Indus (FastAPI + PaDiM/TensorFlow).
+# Image de l'API Anomalies Industrielles (FastAPI + PaDiM/TensorFlow).
 # Multi-architectures : le même Dockerfile sert linux/amd64 et linux/arm64
 # (les wheels TensorFlow sont choisies via les marqueurs pip de requirements.txt).
 FROM python:3.12-slim

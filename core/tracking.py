@@ -8,7 +8,7 @@ l'appel échoue, l'entraînement continue (tracking simplement désactivé).
 
 Variables d'environnement (voir .env) :
     MLFLOW_TRACKING_URI      (défaut : sqlite:///<racine>/mlflow.db)
-    MLFLOW_EXPERIMENT        (défaut : anomalies-indus)
+    MLFLOW_EXPERIMENT        (défaut : anomalies-industrielles)
     MLFLOW_ARTIFACT_BUCKET   (défaut : mlflow)
 """
 
@@ -81,7 +81,7 @@ def setup_mlflow(enabled: bool = True) -> bool:
     except Exception as exc:  # noqa: BLE001 — MinIO indisponible : on continue
         print(f"[WARN] Bucket d'artefacts '{bucket}' indisponible : {exc}")
 
-    experiment = os.getenv("MLFLOW_EXPERIMENT", "anomalies-indus")
+    experiment = os.getenv("MLFLOW_EXPERIMENT", "anomalies-industrielles")
     if mlflow.get_experiment_by_name(experiment) is None:
         mlflow.create_experiment(experiment, artifact_location=f"s3://{bucket}")
     mlflow.set_experiment(experiment)
@@ -218,7 +218,7 @@ def recent_runs(limit: int = 20, category: str | None = None) -> list[dict]:
     import mlflow
 
     client = mlflow.MlflowClient()
-    experiment = client.get_experiment_by_name(os.getenv("MLFLOW_EXPERIMENT", "anomalies-indus"))
+    experiment = client.get_experiment_by_name(os.getenv("MLFLOW_EXPERIMENT", "anomalies-industrielles"))
     if experiment is None:
         return []
 
