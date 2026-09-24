@@ -177,8 +177,19 @@ flowchart LR
 
 **Le run planifié est volontairement léger** (`register: false`) : il ne crée que des
 runs MLflow, sans téléverser l'artefact de 260 Mo — à 1 run/minute, ce serait ~15 Go/h
-dans MinIO. Pour un run **complet** (version au Registry + promotion), on déclenche le
-DAG à la main avec une config.
+dans MinIO. **Et il change de jeu de données à chaque fois** : `data_version` suit une
+**rampe** déduite de la minute du run (`minute % 10` → `v0`, `v1`, … `v9`, puis
+reboucle). Dix entraînements différents au lieu du même rejoué en boucle, sans aucun
+état à stocker et de façon rejouable. Pour un run **complet** (version au Registry +
+promotion), on déclenche le DAG à la main avec une config — `dag_run.conf` a la priorité
+sur la rampe.
+
+**Durées** : 10 à 30 s selon la catégorie — toutes les images sont redimensionnées en
+128×128, donc le coût suit le **nombre** d'images, pas leur résolution (mesuré :
+`toothbrush` 60 images ≈ 10 s, `bottle` 209 → 12 s, `hazelnut` 391 + 110 images de test
+→ 26 s). Le créneau d'une minute tient donc avec un facteur ~2. En cas de dépassement
+(cache TensorFlow froid : ~2 min), le run suivant reste `queued` et démarre dès que la
+place se libère — aucun échec, aucun cran sauté, juste un décalage.
 
 ### `prometheus` et `grafana` — le monitoring (profil `monitoring`)
 
@@ -379,7 +390,7 @@ catalogue les jeux de données versionnés dans git ».
 
 ```bash
 docker compose exec airflow airflow dags unpause training_pipeline   # active la cadence
-# … laisser tourner 2-3 minutes, montrer les runs successifs dans l'UI Airflow
+# … chaque minute : un cran de plus (v0 → v9) — visible dans l'UI Airflow et dans MLflow
 docker compose exec airflow airflow dags pause training_pipeline     # à la fin !
 ```
 
@@ -397,7 +408,8 @@ docker compose exec airflow airflow dags pause training_pipeline     # refermer 
 
 _À dire :_ « Airflow ne fait que de l'orchestration : ses tâches sont deux `curl`.
 Le run planifié est volontairement allégé (`register: false`) pour ne pas écrire
-260 Mo/minute ».
+260 Mo/minute — et il balaie la rampe de données : `v3`, `v4`, `v5`… dix entraînements
+différents, pas le même rejoué en boucle ».
 
 > ⚠️ **Remets le DAG en pause après la démo** : à 1 run/minute il réécrit un
 > artefact local de 260 Mo à chaque fois.

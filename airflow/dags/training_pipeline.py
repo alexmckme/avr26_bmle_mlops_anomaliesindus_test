@@ -9,6 +9,11 @@ train/serve skew, et image Airflow légère : pas de TensorFlow).
 - Un run **planifié** est volontairement léger : `register: false` ⇒ seulement les
   métriques MLflow, sans téléverser l'artefact de ~260 Mo dans MinIO (à 1 run/min
   avec enregistrement, ce serait ~15 Go/heure d'artefacts).
+- **Rampe de données** : chaque run planifié entraîne un cran **différent** du jeu
+  cumulatif (`v0` … `v9`), déduit de la minute du run logique : la rampe monte d'un
+  cran par minute puis reboucle (`v0 → v9 → v0`). Dix entraînements différents au
+  lieu du même rejoué en boucle, de façon **déterministe** (rejouable) et **sans
+  aucun état** à stocker. Un `dag_run.conf` reste prioritaire (run complet manuel).
 - Pour un run **complet** (version enregistrée dans le Registry + promotion
   automatique du champion), déclencher manuellement le DAG depuis l'UI
   (« Trigger DAG w/ config ») avec par exemple :
@@ -32,7 +37,10 @@ TRAINING_SCHEDULE = os.getenv("TRAINING_SCHEDULE", "* * * * *")
 
 # ── Valeurs par défaut d'un run (surchargeables via dag_run.conf) ──────────────
 CATEGORY = "bottle"
-DATA_VERSION = "0"   # "0".."9" (v0 = 10 % … v9 = 100 %, jeux cumulatifs) ou "full"
+# Rampe de données : nombre de crans du jeu cumulatif (v0 = 10 % ... v9 = 100 %).
+# La version par défaut n'est pas figée mais déduite de la minute du run logique
+# (voir TRAIN_CMD) : chaque run planifié change de cran, sans état à stocker.
+DATA_LADDER_STEPS = 10
 EVAL = "True"        # calcule l'AUC sur le split test
 REGISTER = "False"   # True => version dans le Registry (+ promotion du champion)
 
@@ -40,12 +48,17 @@ REGISTER = "False"   # True => version dans le Registry (+ promotion du champion
 CHECK_API_CMD = f"curl -fsS --max-time 15 {API_BASE_URL}/"
 
 # 2) Déclencher l'entraînement : un simple appel HTTP, rien de plus.
+#    `dag_run.conf` a la priorité ; sinon la version suit la rampe (minute % crans).
 TRAIN_CMD = r"""
 set -euo pipefail
-payload="{\"category\": \"{{ (dag_run.conf or {}).get('category', '%s') }}\", \"data_version\": \"{{ (dag_run.conf or {}).get('data_version', '%s') }}\", \"eval\": {{ (dag_run.conf or {}).get('eval', %s) | string | lower }}, \"register\": {{ (dag_run.conf or {}).get('register', %s) | string | lower }}}"
+category="{{ (dag_run.conf or {}).get('category', '%s') }}"
+data_version="{{ (dag_run.conf or {}).get('data_version', dag_run.logical_date.minute %% %d) }}"
+eval_flag="{{ (dag_run.conf or {}).get('eval', %s) | string | lower }}"
+register_flag="{{ (dag_run.conf or {}).get('register', %s) | string | lower }}"
+payload="{\"category\": \"${category}\", \"data_version\": \"${data_version}\", \"eval\": ${eval_flag}, \"register\": ${register_flag}}"
 echo "POST %s/training  ${payload}"
 curl -fsS --max-time 900 -X POST "%s/training" -H 'Content-Type: application/json' -d "${payload}"
-""" % (CATEGORY, DATA_VERSION, EVAL, REGISTER, API_BASE_URL, API_BASE_URL)
+""" % (CATEGORY, DATA_LADDER_STEPS, EVAL, REGISTER, API_BASE_URL, API_BASE_URL)
 
 with DAG(
     dag_id="training_pipeline",

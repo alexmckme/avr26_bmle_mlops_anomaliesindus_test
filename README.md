@@ -728,20 +728,33 @@ flowchart LR
     T[Trigger manuel<br/>avec config] --> B
 ```
 
-| Élément        | Valeur                                                             |
-| -------------- | ------------------------------------------------------------------ |
-| Planification  | `TRAINING_SCHEDULE` (`.env`, défaut `* * * * *` = chaque minute)   |
-| Concurrence    | `max_active_runs=1`, `catchup=False`                               |
-| Run par défaut | `{category: bottle, data_version: 0, eval: true, register: false}` |
-| Surcharge      | `dag_run.conf` (bouton « Trigger DAG w/ config » de l'UI)          |
+| Élément          | Valeur                                                                                  |
+| ---------------- | --------------------------------------------------------------------------------------- |
+| Planification    | `TRAINING_SCHEDULE` (`.env`, défaut `* * * * *` = chaque minute)                        |
+| Concurrence      | `max_active_runs=1`, `catchup=False`                                                    |
+| Version du run   | **rampe** : `data_version` = minute du run logique % `DATA_LADDER_STEPS` (v0 → v9 → v0) |
+| Paramètres fixes | `category: bottle`, `eval: true`, `register: false`                                     |
+| Surcharge        | `dag_run.conf` (« Trigger DAG w/ config »), **prioritaire** sur la rampe                |
 
+- **La rampe de données** : les runs planifiés ne rejouent pas 10 fois le même
+  entraînement, ils balaient le jeu cumulatif (`v0` = 10 % → `v9` = 100 %) cran par
+  cran. La version est déduite de la **minute du run logique** : aucun état à stocker,
+  comportement **déterministe** (rejouable), et la séquence reboucle (`v0 → v9 → v0`)
+  tant que le DAG est actif. Pour démarrer la démo à `v0`, dé-pauser juste avant une
+  minute en `0` (`14:29:40` → premier run `14:30`).
 - **Les runs planifiés sont légers** (`register: false`) : le DAG ne crée que les
   runs MLflow et leurs métriques. À 1 run/min, enregistrer l'artefact (~260 Mo par
   modèle) produirait ~15 Go/heure dans MinIO.
-- Un run planifié dure ~15-35 s (évaluation des 83 images de test + réécriture du
-  `.npz` local de ~260 Mo dans `models/`) ; `max_active_runs=1` évite tout empilement.
-  Le tout premier appel après une reconstruction de l'image `api` est bien plus long
-  (~2-3 min) : TensorFlow retélécharge les poids Keras dans le conteneur.
+- Un run planifié dure **10 à 30 s selon la catégorie** — mesuré : `toothbrush`
+  (60 images) ≈ 10 s, `bottle` (209) 12 s, `hazelnut` (391 + 110 images de test) 26 s.
+  Toutes les images étant redimensionnées en 128×128, le coût suit le **nombre**
+  d'images, pas leur résolution. Le créneau d'une minute est donc tenu avec un facteur
+  ~2, en réécrivant à chaque fois le `.npz` local de ~260 Mo dans `models/`.
+- Si un entraînement dépasse la minute, `max_active_runs=1` fait patienter le suivant :
+  le run est créé au créneau prévu mais reste `queued` jusqu'à libération de la place
+  (aucun run perdu, aucun cran de la rampe sauté — juste un décalage). Le tout premier
+  appel après une reconstruction de l'image `api` est bien plus long (~2-3 min) :
+  TensorFlow retélécharge les poids Keras dans le conteneur.
 - **La promotion du champion se déclenche à la demande**, en passant d'autres
   paramètres dans la config du run :
 
