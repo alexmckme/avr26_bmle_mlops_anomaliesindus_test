@@ -45,7 +45,7 @@ CATEGORY = "bottle"
 # (voir TRAIN_CMD) : chaque run planifié change de cran, sans état à stocker.
 DATA_LADDER_STEPS = 10
 EVAL = "True"        # calcule l'AUC sur le split test
-REGISTER = "False"   # True => version dans le Registry (+ promotion du champion)
+REGISTER = "True"   # True => version dans le Registry (+ promotion du champion)
 
 # 1) Vérifier que l'API répond (échec rapide et lisible si la stack est incomplète).
 CHECK_API_CMD = f"curl -fsS --max-time 15 {API_BASE_URL}/"
