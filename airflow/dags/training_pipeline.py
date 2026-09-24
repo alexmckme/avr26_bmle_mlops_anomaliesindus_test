@@ -14,6 +14,9 @@ train/serve skew, et image Airflow légère : pas de TensorFlow).
   cran par minute puis reboucle (`v0 → v9 → v0`). Dix entraînements différents au
   lieu du même rejoué en boucle, de façon **déterministe** (rejouable) et **sans
   aucun état** à stocker. Un `dag_run.conf` reste prioritaire (run complet manuel).
+  Cadence et contenu sont **indépendants** : `TRAINING_SCHEDULE` fixe le *rythme*
+  (quand une exécution est créée), la rampe fixe le *contenu* (ce qu'elle entraîne),
+  et `max_active_runs=1` fait qu'elles s'enchaînent sans jamais se chevaucher.
 - Pour un run **complet** (version enregistrée dans le Registry + promotion
   automatique du champion), déclencher manuellement le DAG depuis l'UI
   (« Trigger DAG w/ config ») avec par exemple :

@@ -168,6 +168,12 @@ flowchart LR
 - `check_api` : vérifie que l'API répond (échec rapide et lisible si la stack est incomplète) ;
 - `train` : appelle `POST /training` avec les paramètres de `dag_run.conf`.
 
+> **Le rythme et le contenu sont deux choses distinctes.** Le _scheduler_ décide
+> **quand** : une exécution par minute (`TRAINING_SCHEDULE`). La **rampe** décide
+> **quoi** : la version de données est déduite de la minute du run
+> (`data_version = minute % 10`). Et `max_active_runs=1` décide **combien à la fois** :
+> une seule — c'est ce qui donne l'effet « les unes à la suite des autres ».
+
 |           |                                                                        |
 | --------- | ---------------------------------------------------------------------- |
 | Image     | `apache/airflow:2.10.5-python3.12` (Airflow 3 ne supporte plus SQLite) |
@@ -409,7 +415,10 @@ docker compose exec airflow airflow dags pause training_pipeline     # refermer 
 _À dire :_ « Airflow ne fait que de l'orchestration : ses tâches sont deux `curl`.
 Le run planifié est volontairement allégé (`register: false`) pour ne pas écrire
 260 Mo/minute — et il balaie la rampe de données : `v3`, `v4`, `v5`… dix entraînements
-différents, pas le même rejoué en boucle ».
+différents, pas le même rejoué en boucle. **La planification donne le rythme, la rampe
+donne le contenu** : le _scheduler_ crée une exécution par minute, et chaque exécution
+tire sa version de sa propre date logique (`minute % 10`) — dix crans balayés en dix
+minutes, puis la boucle recommence. »
 
 > ⚠️ **Remets le DAG en pause après la démo** : à 1 run/minute il réécrit un
 > artefact local de 260 Mo à chaque fois.
