@@ -450,10 +450,16 @@ http://localhost:5050, **MinIO** http://localhost:9200 (`minioadmin` / `minioadm
 docker compose --profile airflow --profile monitoring down
 ./scripts/reset_demo.sh                    # démo à blanc : vide runs/artefacts/modèles
 ./scripts/reset_demo.sh --full             # + vide aussi les images de MinIO
+./scripts/reset_demo.sh --index            # + remet datasets.json à zéro
+./scripts/reset_demo.sh --volumes          # + efface volumes Airflow/Grafana (destructif)
 ```
 
-`reset_demo.sh` **déplace** (ne supprime jamais) vers `/tmp/anomalies-demo-backup/…`,
-et ne touche pas à `datasets.json` (fichier d'historique committé).
+`reset_demo.sh` **déplace** (ne supprime jamais) vers `$BACKUP_ROOT` (défaut
+`/tmp/anomalies-demo-backup`, chemin et taille imprimés à la fin). Sur macOS, `/tmp` étant
+purgé au bout de ~3 jours, préférer un dossier durable pour une répétition :
+`BACKUP_ROOT=~/demo-backups ./scripts/reset_demo.sh`.
+Par défaut, `datasets.json` (index committé) et l'historique Airflow sont **conservés** :
+`--index` et `--volumes` les remettent à zéro si tu veux un départ vraiment propre.
 
 ---
 

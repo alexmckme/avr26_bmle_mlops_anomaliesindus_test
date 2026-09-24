@@ -284,11 +284,16 @@ installés sur la machine — tout vit dans les images (`docker images` : `anoma
 ## Démo à blanc (reset local)
 
 Pour une démonstration « live » sans que les runs/modèles précédents interfèrent.
-Rien n'est supprimé : tout est **déplacé** vers `/tmp/anomalies-demo-backup/<horodatage>`.
+Rien n'est supprimé : tout est **déplacé** vers `$BACKUP_ROOT/<horodatage>` — défaut
+`/tmp/anomalies-demo-backup` (soit `/private/tmp/...` sur macOS, que le système purge au
+bout de ~3 jours : pour une répétition de soutenance, viser un dossier durable,
+`BACKUP_ROOT=~/demo-backups ./scripts/reset_demo.sh`).
 
 ```bash
 ./scripts/reset_demo.sh            # garde les images MinIO, remet MLflow + modèles à zéro
 ./scripts/reset_demo.sh --full     # vide aussi le bucket des images (démo complète)
+./scripts/reset_demo.sh --index    # + remet datasets.json à zéro
+./scripts/reset_demo.sh --volumes  # + supprime les volumes Docker (destructif)
 ./scripts/reset_demo.sh --restore  # restaure la dernière sauvegarde
 ```
 
@@ -297,11 +302,19 @@ Rien n'est supprimé : tout est **déplacé** vers `/tmp/anomalies-demo-backup/<
 | `minio-data/mlflow/` (artefacts MLflow) | vidé            | vidé          |
 | `mlflow.db` (runs + Registry + alias)   | remis à zéro    | remis à zéro  |
 | `models/` (modèles + cache champion)    | vidé            | vidé          |
+| `datasets.json` (index des datasets)    | **conservé**    | **conservé**  |
 | `minio-data/mvtec-ad/` (images)         | **conservé**    | vidé          |
 | `dataset/raw/` (source)                 | jamais touché   | jamais touché |
+| volumes Airflow / Grafana / Prometheus  | **conservés**   | **conservés** |
+
+`--index` et `--volumes` sont indépendants de `--full`. `--volumes` est la seule option
+**destructrice** : elle efface l'historique Airflow et les données Grafana/Prometheus,
+qui ne sont **pas** couverts par la sauvegarde.
 
 Après un reset, `/predict` renvoie `404` (aucun modèle) : c'est l'état de départ idéal
-pour démontrer `/training` → Registry → promotion → `/predict`.
+pour démontrer `/training` → Registry → promotion → `/predict`. Le dashboard Grafana est
+lui aussi quasi vide jusqu'au premier entraînement (compteurs en mémoire remis à zéro et
+jauge du champion absente).
 
 ## Récupérer le dataset (Kaggle)
 
